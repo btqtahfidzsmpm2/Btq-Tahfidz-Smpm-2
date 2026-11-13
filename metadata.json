@@ -1,0 +1,6 @@
+{
+  "name": "SIM-Qur'an & Tahfidz SMP Muhammadiyah 2 Surabaya",
+  "description": "Sistem Informasi Mutaba'ah Harian, Presensi BTQ, Capaian Tilawati Remaja, Setoran Tahfidz, dan Ujian Kenaikan SMP Muhammadiyah 2 Surabaya.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
