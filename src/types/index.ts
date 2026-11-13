@@ -1,10 +1,43 @@
 export type Role = 'admin' | 'guru_ngaji' | 'guru_tahfidz' | 'wali_kelas';
 
 export interface UserSession {
+  accountId: string;
+  username: string;
   role: Role;
   nama: string;
   assignedGroup?: string; // For guru_ngaji (e.g., "AL-QUR'AN PI D" or "UMI KULSUM")
   assignedClass?: string; // For wali_kelas (e.g., "7D" or "7A")
+  isDefaultPassword?: boolean;
+  loginAt: number;
+}
+
+export interface UserAccount {
+  id: string;
+  username: string;
+  passwordHash: string;
+  salt: string;
+  role: Role;
+  nama: string;
+  teacherId?: string;
+  assignedGroup?: string;
+  assignedClass?: string;
+  isActive: boolean;
+  isDefaultPassword: boolean;
+  failedAttempts: number;
+  lockedUntil?: number;
+  lastLogin?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AuthLogEntry {
+  id: string;
+  timestamp: string;
+  username: string;
+  nama?: string;
+  role?: Role;
+  event: 'LOGIN_SUCCESS' | 'LOGIN_FAILED' | 'ACCOUNT_LOCKED' | 'PASSWORD_CHANGED' | 'PASSWORD_RESET' | 'ACCOUNT_CREATED';
+  detail: string;
 }
 
 export interface Teacher {

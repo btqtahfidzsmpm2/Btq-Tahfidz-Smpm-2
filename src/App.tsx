@@ -4,8 +4,18 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { Student, UserSession, BacaanRecord, TahfidzRecord, AbsensiRecord, Teacher } from './types';
+import {
+  Student,
+  UserSession,
+  BacaanRecord,
+  TahfidzRecord,
+  AbsensiRecord,
+  Teacher,
+  UserAccount,
+  AuthLogEntry
+} from './types';
 import { storage } from './services/storage';
+import { authService } from './services/auth';
 import { Navbar } from './components/Navbar';
 import { PublicPortal } from './components/PublicPortal';
 import { TeacherDashboard } from './components/TeacherDashboard';
@@ -13,6 +23,7 @@ import { Toast, ToastMessage } from './components/Toast';
 
 // Modals
 import { LoginModal } from './components/modals/LoginModal';
+import { ChangePasswordModal } from './components/modals/ChangePasswordModal';
 import { InputBacaanModal } from './components/modals/InputBacaanModal';
 import { InputTahfidzModal } from './components/modals/InputTahfidzModal';
 import { InputUjianModal } from './components/modals/InputUjianModal';
@@ -29,6 +40,8 @@ export default function App() {
   // Core Data
   const [students, setStudents] = useState<Student[]>([]);
   const [teachers, setTeachers] = useState<Teacher[]>([]);
+  const [accounts, setAccounts] = useState<UserAccount[]>([]);
+  const [authLogs, setAuthLogs] = useState<AuthLogEntry[]>([]);
   const [bacaanList, setBacaanList] = useState<BacaanRecord[]>([]);
   const [tahfidzList, setTahfidzList] = useState<TahfidzRecord[]>([]);
   const [absensiList, setAbsensiList] = useState<AbsensiRecord[]>([]);
@@ -52,6 +65,7 @@ export default function App() {
 
   // Modals state
   const [showLoginModal, setShowLoginModal] = useState(false);
+  const [showChangePasswordModal, setShowChangePasswordModal] = useState(false);
   const [showBacaanModal, setShowBacaanModal] = useState(false);
   const [showTahfidzModal, setShowTahfidzModal] = useState(false);
   const [showUjianModal, setShowUjianModal] = useState(false);
@@ -76,8 +90,13 @@ export default function App() {
     setToasts(prev => prev.filter(t => t.id !== id));
   };
 
+  const refreshAccounts = () => {
+    setAccounts(authService.getAccounts());
+    setAuthLogs(authService.getLogs());
+  };
+
   // Reload data from storage
-  const reloadData = () => {
+  const reloadData = async () => {
     const stds = storage.getStudents();
     const tchs = storage.getTeachers();
     setStudents(stds);
@@ -85,6 +104,10 @@ export default function App() {
     setBacaanList(storage.getBacaan());
     setTahfidzList(storage.getTahfidz());
     setAbsensiList(storage.getAbsensi());
+
+    // Keep auth accounts synced with active teachers
+    await authService.syncAccounts(tchs);
+    refreshAccounts();
 
     // Sync selected student if any
     if (selectedStudent) {
@@ -94,11 +117,20 @@ export default function App() {
   };
 
   useEffect(() => {
-    // 1. Deduplicate students so each name exists exactly once
-    storage.deduplicateStudentsByName();
-    // 2. Purge any orphan sample teachers and synchronize real teachers from student records
-    storage.syncTeachersFromStudents(true);
-    reloadData();
+    const init = async () => {
+      // 1. Deduplicate students so each name exists exactly once
+      storage.deduplicateStudentsByName();
+      // 2. Purge any orphan sample teachers and synchronize real teachers from student records
+      storage.syncTeachersFromStudents(true);
+      await reloadData();
+
+      // 3. Restore active validated session if available
+      const savedSession = authService.getSavedSession();
+      if (savedSession) {
+        setUser(savedSession);
+      }
+    };
+    init();
   }, []);
 
   const handleSyncTeachers = () => {
@@ -132,6 +164,7 @@ export default function App() {
   const handleLogin = (session: UserSession) => {
     setUser(session);
     setCurrentView('dashboard');
+    refreshAccounts();
     addToast(
       'success',
       'Login Berhasil',
@@ -140,6 +173,7 @@ export default function App() {
   };
 
   const handleLogout = () => {
+    authService.logout();
     setUser(null);
     setCurrentView('public');
     addToast('info', 'Telah Keluar', 'Anda telah keluar dari portal pengajar.');
@@ -219,6 +253,7 @@ export default function App() {
         onNavigate={view => setCurrentView(view)}
         user={user}
         onOpenLogin={() => setShowLoginModal(true)}
+        onOpenChangePassword={() => setShowChangePasswordModal(true)}
         onLogout={handleLogout}
       />
 
@@ -239,6 +274,10 @@ export default function App() {
             user={user}
             students={students}
             teachers={teachers}
+            accounts={accounts}
+            authLogs={authLogs}
+            onRefreshAccounts={refreshAccounts}
+            onOpenChangePasswordModal={() => setShowChangePasswordModal(true)}
             onOpenBacaanModal={student => {
               setModalTargetStudent(student);
               setShowBacaanModal(true);
@@ -304,12 +343,20 @@ export default function App() {
         isOpen={showLoginModal}
         onClose={() => setShowLoginModal(false)}
         onLogin={handleLogin}
-        teachers={teachers}
-        teachersList={teachers.map(t => t.nama)}
       />
 
       {user && (
         <>
+          <ChangePasswordModal
+            isOpen={showChangePasswordModal}
+            onClose={() => setShowChangePasswordModal(false)}
+            user={user}
+            onSuccess={updated => {
+              setUser(prev => (prev ? { ...prev, ...updated } : null));
+              refreshAccounts();
+            }}
+            onNotify={addToast}
+          />
           <InputBacaanModal
             isOpen={showBacaanModal}
             onClose={() => {

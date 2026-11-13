@@ -1,12 +1,13 @@
 import React from 'react';
 import { UserSession } from '../types';
-import { LogIn, LogOut, BookOpen } from 'lucide-react';
+import { LogIn, LogOut, KeyRound } from 'lucide-react';
 
 interface NavbarProps {
   currentView: 'public' | 'dashboard';
   onNavigate: (view: 'public' | 'dashboard') => void;
   user: UserSession | null;
   onOpenLogin: () => void;
+  onOpenChangePassword: () => void;
   onLogout: () => void;
 }
 
@@ -15,6 +16,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onNavigate,
   user,
   onOpenLogin,
+  onOpenChangePassword,
   onLogout
 }) => {
   return (
@@ -76,7 +78,7 @@ export const Navbar: React.FC<NavbarProps> = ({
         </nav>
 
         {/* Zone 3: 1 Primary Action */}
-        <div className="flex items-center gap-3 shrink-0">
+        <div className="flex items-center gap-2.5 shrink-0">
           {!user ? (
             <button
               onClick={onOpenLogin}
@@ -86,17 +88,29 @@ export const Navbar: React.FC<NavbarProps> = ({
               <span>Login Petugas</span>
             </button>
           ) : (
-            <div className="flex items-center gap-3">
-              <div className="text-right hidden sm:block">
+            <div className="flex items-center gap-2">
+              <div className="text-right hidden sm:block mr-1">
                 <p className="text-xs font-bold text-white truncate max-w-[160px] leading-tight">
                   {user.nama}
                 </p>
-                <p className="text-[10px] text-amber-300 font-medium uppercase tracking-wide">
-                  {user.role.replace('_', ' ')}
-                  {user.assignedGroup ? ` · ${user.assignedGroup}` : ''}
-                  {user.assignedClass ? ` · Kelas ${user.assignedClass}` : ''}
+                <p className="text-[10px] text-amber-300 font-medium tracking-wide">
+                  <span className="font-mono lowercase">@{user.username}</span>
+                  {' · '}
+                  <span className="uppercase">
+                    {user.role.replace('_', ' ')}
+                    {user.assignedClass ? ` ${user.assignedClass}` : ''}
+                  </span>
                 </p>
               </div>
+
+              <button
+                onClick={onOpenChangePassword}
+                className="px-2.5 py-1.5 text-xs font-semibold text-emerald-100 bg-emerald-900/70 hover:bg-emerald-900 border border-emerald-700/60 rounded-lg transition-colors whitespace-nowrap shrink-0 flex items-center gap-1"
+                title="Ubah Password Akun"
+              >
+                <KeyRound className="w-3.5 h-3.5 text-amber-300" />
+                <span className="hidden lg:inline">Password</span>
+              </button>
 
               <button
                 onClick={onLogout}

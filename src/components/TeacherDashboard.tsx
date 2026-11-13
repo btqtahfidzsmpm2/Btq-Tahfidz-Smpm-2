@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
-import { Student, UserSession, Teacher } from '../types';
+import { Student, UserSession, Teacher, UserAccount, AuthLogEntry } from '../types';
 import { BatchEvaluationTable } from './BatchEvaluationTable';
+import { AccountSecurityPanel } from './AccountSecurityPanel';
 import {
   Users,
   BookOpen,
@@ -23,13 +24,20 @@ import {
   CopyX,
   Table,
   Layers,
-  Sparkles
+  Sparkles,
+  Shield,
+  KeyRound,
+  AlertTriangle
 } from 'lucide-react';
 
 interface TeacherDashboardProps {
   user: UserSession;
   students: Student[];
   teachers: Teacher[];
+  accounts: UserAccount[];
+  authLogs: AuthLogEntry[];
+  onRefreshAccounts: () => void;
+  onOpenChangePasswordModal: () => void;
   onOpenBacaanModal: (student?: Student) => void;
   onOpenTahfidzModal: (student?: Student) => void;
   onOpenUjianModal: (student?: Student) => void;
@@ -52,6 +60,10 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   user,
   students,
   teachers,
+  accounts,
+  authLogs,
+  onRefreshAccounts,
+  onOpenChangePasswordModal,
   onOpenBacaanModal,
   onOpenTahfidzModal,
   onOpenUjianModal,
@@ -69,8 +81,8 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   onDataUpdated,
   onNotify
 }) => {
-  // Admin sub-menu tab: 'siswa' | 'penilaian' | 'guru'
-  const [adminTab, setAdminTab] = useState<'siswa' | 'penilaian' | 'guru'>('siswa');
+  // Admin sub-menu tab: 'siswa' | 'penilaian' | 'guru' | 'keamanan'
+  const [adminTab, setAdminTab] = useState<'siswa' | 'penilaian' | 'guru' | 'keamanan'>('siswa');
 
   // Guru Ngaji tab: 'tabel' (Tabel Penilaian Massal Real-Time) | 'list' (Daftar Siswa & Rapor)
   const [guruNgajiTab, setGuruNgajiTab] = useState<'tabel' | 'list'>('tabel');
@@ -222,6 +234,32 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
 
   return (
     <div className="space-y-6">
+
+      {/* Default Password Security Alert Banner */}
+      {user.isDefaultPassword && (
+        <section className="bg-amber-50 border border-amber-300 rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-2xs">
+          <div className="flex items-start gap-3">
+            <div className="w-8 h-8 rounded-xl bg-amber-400 text-slate-900 flex items-center justify-center shrink-0">
+              <AlertTriangle className="w-4 h-4" />
+            </div>
+            <div>
+              <h3 className="text-xs font-extrabold text-amber-950">
+                Peringatan Keamanan: Anda Masih Menggunakan Password Standar Awal
+              </h3>
+              <p className="text-[11px] text-amber-900 mt-0.5 leading-relaxed">
+                Demi menjaga keamanan data nilai & santri, segera perbarui password akun <strong className="font-mono">@{user.username}</strong> dengan password pribadi Anda sendiri.
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={onOpenChangePasswordModal}
+            className="px-3.5 py-2 bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold rounded-xl text-xs transition-colors flex items-center gap-1.5 shrink-0 shadow-2xs"
+          >
+            <KeyRound className="w-3.5 h-3.5" />
+            <span>Ubah Password Sekarang</span>
+          </button>
+        </section>
+      )}
 
       {/* Top Banner & Title */}
       <section className="bg-white p-5 sm:p-6 rounded-2xl border border-slate-200 shadow-xs flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">
@@ -388,6 +426,18 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
               <UserCheck className="w-4 h-4" />
               <span>Kelola Guru Ngaji & Tahfidz ({teachers.length})</span>
             </button>
+
+            <button
+              onClick={() => setAdminTab('keamanan')}
+              className={`px-4 py-2 text-xs font-bold rounded-xl transition-colors flex items-center gap-2 ${
+                adminTab === 'keamanan'
+                  ? 'bg-slate-900 text-white shadow-2xs'
+                  : 'bg-white text-slate-600 hover:bg-slate-50 border border-slate-200'
+              }`}
+            >
+              <Shield className="w-4 h-4" />
+              <span>Akun & Keamanan Login ({accounts.length})</span>
+            </button>
           </div>
 
           <button
@@ -399,6 +449,17 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
             <span>Hapus Nama Siswa Dobel</span>
           </button>
         </div>
+      )}
+
+      {/* VIEW 0: KELOLA AKUN & KEAMANAN LOGIN (ADMIN ONLY) */}
+      {user.role === 'admin' && adminTab === 'keamanan' && (
+        <AccountSecurityPanel
+          currentUser={user}
+          accounts={accounts}
+          logs={authLogs}
+          onRefreshAccounts={onRefreshAccounts}
+          onNotify={onNotify}
+        />
       )}
 
       {/* VIEW 1: TABEL PENILAIAN MASSAL (GURU NGAJI / ADMIN) */}
@@ -927,11 +988,22 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                       const studentCount = students.filter(
                         s => s.pengajar.toLowerCase().includes(teacher.nama.toLowerCase())
                       ).length;
+                      const linkedAcc = accounts.find(
+                        a =>
+                          a.teacherId === teacher.id ||
+                          ((a.role === 'guru_ngaji' || a.role === 'guru_tahfidz') &&
+                            a.nama.trim().toUpperCase() === teacher.nama.trim().toUpperCase())
+                      );
 
                       return (
                         <tr key={teacher.id} className="hover:bg-slate-50/70 transition-colors">
                           <td className="p-3 font-bold text-slate-900">
-                            {teacher.nama}
+                            <div>{teacher.nama}</div>
+                            {linkedAcc && (
+                              <div className="text-[11px] font-mono font-normal text-slate-500 mt-0.5">
+                                Login: <span className="text-emerald-800 font-semibold">{linkedAcc.username}</span>
+                              </div>
+                            )}
                           </td>
 
                           <td className="p-3">
