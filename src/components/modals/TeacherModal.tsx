@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Teacher } from '../../types';
 import { storage } from '../../services/storage';
 import { authService, slugifyUsername, DEFAULT_PASSWORDS } from '../../services/auth';
+import { splitGroupTokens } from '../../utils/access';
 import { X, UserCheck, BookOpen, Award, KeyRound, Eye, EyeOff, User } from 'lucide-react';
 
 interface TeacherModalProps {
@@ -21,7 +22,9 @@ export const TeacherModal: React.FC<TeacherModalProps> = ({
 }) => {
   const [nama, setNama] = useState('');
   const [role, setRole] = useState<'guru_ngaji' | 'guru_tahfidz'>('guru_ngaji');
-  const [kelompokBTQ, setKelompokBTQ] = useState('');
+  const [kelompokBTQ1, setKelompokBTQ1] = useState('');
+  const [kelompokBTQ2, setKelompokBTQ2] = useState('');
+  const [kelompokTahfidz, setKelompokTahfidz] = useState('HALAQAH TAHFIDZ');
   const [ruangan, setRuangan] = useState('RUANGAN 7A');
   const [kontak, setKontak] = useState('');
   const [username, setUsername] = useState('');
@@ -36,8 +39,21 @@ export const TeacherModal: React.FC<TeacherModalProps> = ({
 
     if (teacherToEdit) {
       setNama(teacherToEdit.nama);
-      setRole(teacherToEdit.role);
-      setKelompokBTQ(teacherToEdit.kelompokBTQ);
+      const normalizedRole: 'guru_ngaji' | 'guru_tahfidz' =
+        teacherToEdit.role === 'guru_tahfidz' ? 'guru_tahfidz' : 'guru_ngaji';
+      setRole(normalizedRole);
+
+      if (normalizedRole === 'guru_tahfidz') {
+        setKelompokBTQ1('');
+        setKelompokBTQ2('');
+        setKelompokTahfidz(teacherToEdit.kelompokTahfidz || teacherToEdit.kelompokBTQ || 'HALAQAH TAHFIDZ');
+      } else {
+        const tokens = splitGroupTokens(teacherToEdit.kelompokBTQ);
+        setKelompokBTQ1(tokens[0] || teacherToEdit.kelompokBTQ || '');
+        setKelompokBTQ2(tokens.slice(1).join(', '));
+        setKelompokTahfidz('HALAQAH TAHFIDZ');
+      }
+
       setRuangan(teacherToEdit.ruangan);
       setKontak(teacherToEdit.kontak || '');
       const existingAcc = authService
@@ -52,7 +68,9 @@ export const TeacherModal: React.FC<TeacherModalProps> = ({
     } else {
       setNama('');
       setRole('guru_ngaji');
-      setKelompokBTQ('TILAWATI 4 PA');
+      setKelompokBTQ1('TILAWATI 4 PA');
+      setKelompokBTQ2('');
+      setKelompokTahfidz('HALAQAH TAHFIDZ');
       setRuangan('RUANGAN 7A');
       setKontak('');
       setUsername('');
@@ -69,10 +87,18 @@ export const TeacherModal: React.FC<TeacherModalProps> = ({
 
   if (!isOpen) return null;
 
+  const teachesNgaji = role === 'guru_ngaji';
+  const teachesTahfidz = role === 'guru_tahfidz';
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!nama.trim()) {
       onNotify('error', 'Nama Guru Wajib Diisi', 'Silakan masukkan nama lengkap ustadz / ustadzah.');
+      return;
+    }
+
+    if (teachesNgaji && !kelompokBTQ1.trim()) {
+      onNotify('error', 'Kelas BTQ 1 Wajib Diisi', 'Masukkan minimal 1 kelas / kelompok Ngaji (BTQ).');
       return;
     }
 
@@ -81,12 +107,23 @@ export const TeacherModal: React.FC<TeacherModalProps> = ({
       return;
     }
 
+    const combinedBTQ = teachesNgaji
+      ? [kelompokBTQ1.trim().toUpperCase(), kelompokBTQ2.trim().toUpperCase()]
+          .filter(Boolean)
+          .join(', ')
+      : kelompokTahfidz.trim().toUpperCase() || 'HALAQAH TAHFIDZ';
+
+    const tahfidzGroupValue = teachesTahfidz
+      ? kelompokTahfidz.trim().toUpperCase() || 'HALAQAH TAHFIDZ'
+      : undefined;
+
     let savedTeacher: Teacher;
     if (teacherToEdit) {
       storage.updateTeacher(teacherToEdit.id, {
         nama: nama.trim().toUpperCase(),
         role,
-        kelompokBTQ: kelompokBTQ.trim(),
+        kelompokBTQ: combinedBTQ,
+        kelompokTahfidz: tahfidzGroupValue,
         ruangan: ruangan.trim(),
         kontak: kontak.trim()
       });
@@ -94,7 +131,8 @@ export const TeacherModal: React.FC<TeacherModalProps> = ({
         ...teacherToEdit,
         nama: nama.trim().toUpperCase(),
         role,
-        kelompokBTQ: kelompokBTQ.trim(),
+        kelompokBTQ: combinedBTQ,
+        kelompokTahfidz: tahfidzGroupValue,
         ruangan: ruangan.trim(),
         kontak: kontak.trim()
       };
@@ -102,7 +140,8 @@ export const TeacherModal: React.FC<TeacherModalProps> = ({
       savedTeacher = storage.addTeacher({
         nama: nama.trim().toUpperCase(),
         role,
-        kelompokBTQ: kelompokBTQ.trim(),
+        kelompokBTQ: combinedBTQ,
+        kelompokTahfidz: tahfidzGroupValue,
         ruangan: ruangan.trim(),
         kontak: kontak.trim()
       });
@@ -140,7 +179,7 @@ export const TeacherModal: React.FC<TeacherModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl relative border border-slate-200 max-h-[92vh] overflow-y-auto">
+      <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl relative border border-slate-200 max-h-[92vh] overflow-y-auto">
 
         {/* Header */}
         <div className="flex items-center justify-between pb-3 border-b border-slate-100">
@@ -182,7 +221,7 @@ export const TeacherModal: React.FC<TeacherModalProps> = ({
             <label className="text-xs font-bold text-slate-700 block mb-1">
               Bidang / Peran Pengajar:
             </label>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               <button
                 type="button"
                 onClick={() => setRole('guru_ngaji')}
@@ -206,25 +245,58 @@ export const TeacherModal: React.FC<TeacherModalProps> = ({
                 }`}
               >
                 <Award className="w-4 h-4 text-amber-600 shrink-0" />
-                <span className="text-xs leading-tight">Guru Tahfidz</span>
+                <span className="text-xs leading-tight">Guru Tahfidz (Program Tahfidz)</span>
               </button>
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-2">
+          {teachesNgaji && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <div>
+                <label className="text-xs font-bold text-slate-700 block mb-1">
+                  Kelas BTQ 1 (Wajib):
+                </label>
+                <input
+                  type="text"
+                  value={kelompokBTQ1}
+                  onChange={e => setKelompokBTQ1(e.target.value)}
+                  placeholder="Misal: TILAWATI 4 PA"
+                  required
+                  className="w-full p-2 border border-slate-300 rounded-lg text-xs font-medium uppercase bg-white focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-bold text-slate-700 block mb-1">
+                  Kelas BTQ 2 (Opsional - 2 Kelas):
+                </label>
+                <input
+                  type="text"
+                  value={kelompokBTQ2}
+                  onChange={e => setKelompokBTQ2(e.target.value)}
+                  placeholder="Misal: TILAWATI 5 PA"
+                  className="w-full p-2 border border-slate-300 rounded-lg text-xs font-medium uppercase bg-white focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                />
+              </div>
+            </div>
+          )}
+
+          {teachesTahfidz && (
             <div>
               <label className="text-xs font-bold text-slate-700 block mb-1">
-                Kelompok / Tingkat BTQ:
+                Halaqah / Kelompok Tahfidz:
               </label>
               <input
                 type="text"
-                value={kelompokBTQ}
-                onChange={e => setKelompokBTQ(e.target.value)}
-                placeholder="Misal: TILAWATI 4 PA"
+                value={kelompokTahfidz}
+                onChange={e => setKelompokTahfidz(e.target.value)}
+                placeholder="Misal: HALAQAH TAHFIDZ JUZ 30"
                 required
-                className="w-full p-2 border border-slate-300 rounded-lg text-xs font-medium bg-white focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                className="w-full p-2 border border-amber-300 rounded-lg text-xs font-medium uppercase bg-amber-50/30 focus:outline-none focus:ring-1 focus:ring-amber-500"
               />
             </div>
+          )}
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             <div>
               <label className="text-xs font-bold text-slate-700 block mb-1">
                 Ruangan Halaqah:
@@ -238,26 +310,25 @@ export const TeacherModal: React.FC<TeacherModalProps> = ({
                 className="w-full p-2 border border-slate-300 rounded-lg text-xs font-medium bg-white focus:outline-none focus:ring-1 focus:ring-emerald-500"
               />
             </div>
-          </div>
-
-          <div>
-            <label className="text-xs font-bold text-slate-700 block mb-1">
-              Nomor WhatsApp / Kontak (Opsional):
-            </label>
-            <input
-              type="text"
-              value={kontak}
-              onChange={e => setKontak(e.target.value)}
-              placeholder="Misal: 081234567890"
-              className="w-full p-2 border border-slate-300 rounded-lg text-xs font-mono bg-white focus:outline-none focus:ring-1 focus:ring-emerald-500"
-            />
+            <div>
+              <label className="text-xs font-bold text-slate-700 block mb-1">
+                Nomor WhatsApp (Opsional):
+              </label>
+              <input
+                type="text"
+                value={kontak}
+                onChange={e => setKontak(e.target.value)}
+                placeholder="Misal: 081234567890"
+                className="w-full p-2 border border-slate-300 rounded-lg text-xs font-mono bg-white focus:outline-none focus:ring-1 focus:ring-emerald-500"
+              />
+            </div>
           </div>
 
           {/* Credentials Box */}
           <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 space-y-2.5">
             <div className="flex items-center gap-1.5 text-xs font-bold text-slate-800">
               <KeyRound className="w-3.5 h-3.5 text-emerald-700" />
-              <span>Kredensial Login Guru</span>
+              <span>Kredensial Login Guru (1 Akun Tunggal)</span>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -333,3 +404,4 @@ export const TeacherModal: React.FC<TeacherModalProps> = ({
     </div>
   );
 };
+

@@ -16,6 +16,11 @@ import {
 } from './types';
 import { storage } from './services/storage';
 import { authService } from './services/auth';
+import {
+  getAuthorizedStudents,
+  getAuthorizedNgajiStudents,
+  getAuthorizedTahfidzStudents
+} from './utils/access';
 import { Navbar } from './components/Navbar';
 import { PublicPortal } from './components/PublicPortal';
 import { TeacherDashboard } from './components/TeacherDashboard';
@@ -58,7 +63,7 @@ export default function App() {
 
   // Delete confirmation target
   const [deleteTarget, setDeleteTarget] = useState<{
-    type: 'Siswa' | 'Guru Pengajar';
+    type: 'Siswa' | 'Guru Pengajar' | 'Semua Data';
     name: string;
     idOrNisn: string;
   } | null>(null);
@@ -120,11 +125,13 @@ export default function App() {
     const init = async () => {
       // 1. Deduplicate students so each name exists exactly once
       storage.deduplicateStudentsByName();
-      // 2. Purge any orphan sample teachers and synchronize real teachers from student records
+      // 2. Normalize legacy merged roles so Guru Ngaji (Kelas BTQ) & Guru Tahfidz (Program Tahfidz) stay distinct
+      storage.normalizeTeacherRoles();
+      // 3. Purge any orphan sample teachers and synchronize real teachers from student records
       storage.syncTeachersFromStudents(true);
       await reloadData();
 
-      // 3. Restore active validated session if available
+      // 4. Restore active validated session if available
       const savedSession = authService.getSavedSession();
       if (savedSession) {
         setUser(savedSession);
@@ -168,7 +175,7 @@ export default function App() {
     addToast(
       'success',
       'Login Berhasil',
-      `Selamat datang, ${session.nama} (${session.role.replace('_', ' ').toUpperCase()}).`
+      `Selamat datang, ${session.nama} (${session.role.replace(/_/g, ' ').toUpperCase()}).`
     );
   };
 
@@ -220,11 +227,28 @@ export default function App() {
     setShowDeleteConfirm(true);
   };
 
+  const handleRequestClearAllData = () => {
+    setDeleteTarget({
+      type: 'Semua Data',
+      name: `Seluruh ${students.length} data siswa, ${teachers.length} guru pengajar, riwayat bacaan, tahfidz, dan absensi`,
+      idOrNisn: 'ALL'
+    });
+    setShowDeleteConfirm(true);
+  };
+
   // Execute Confirmed Delete in Real Time
   const handleConfirmDelete = () => {
     if (!deleteTarget) return;
 
-    if (deleteTarget.type === 'Siswa') {
+    if (deleteTarget.type === 'Semua Data') {
+      storage.clearAllData();
+      setSelectedStudent(null);
+      addToast(
+        'success',
+        'Semua Data Dikosongkan',
+        'Seluruh data siswa, guru, bacaan, tahfidz, dan presensi telah dihapus. Silakan impor data baru.'
+      );
+    } else if (deleteTarget.type === 'Siswa') {
       storage.deleteStudent(deleteTarget.idOrNisn);
       addToast(
         'success',
@@ -245,7 +269,7 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen flex flex-col bg-slate-100 text-slate-800">
+    <div className="min-h-screen flex flex-col bg-slate-100 text-slate-800 print:bg-white">
       
       {/* Navbar with 3-zone contract */}
       <Navbar
@@ -258,7 +282,7 @@ export default function App() {
       />
 
       {/* Main Content Area */}
-      <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8">
+      <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8 print:p-0 print:max-w-none print:m-0">
         {currentView === 'public' ? (
           <PublicPortal
             students={students}
@@ -274,6 +298,9 @@ export default function App() {
             user={user}
             students={students}
             teachers={teachers}
+            bacaanList={bacaanList}
+            tahfidzList={tahfidzList}
+            absensiList={absensiList}
             accounts={accounts}
             authLogs={authLogs}
             onRefreshAccounts={refreshAccounts}
@@ -304,6 +331,7 @@ export default function App() {
             onViewStudentReport={handleViewStudentReport}
             onSyncTeachersFromStudents={handleSyncTeachers}
             onDeduplicateStudents={handleDeduplicateStudents}
+            onClearAllData={handleRequestClearAllData}
             onDataUpdated={reloadData}
             onNotify={addToast}
           />
@@ -363,7 +391,7 @@ export default function App() {
               setShowBacaanModal(false);
               setModalTargetStudent(undefined);
             }}
-            students={students}
+            students={getAuthorizedNgajiStudents(user, students)}
             initialStudent={modalTargetStudent}
             user={user}
             onSuccess={reloadData}
@@ -376,7 +404,7 @@ export default function App() {
               setShowTahfidzModal(false);
               setModalTargetStudent(undefined);
             }}
-            students={students}
+            students={getAuthorizedTahfidzStudents(user, students)}
             initialStudent={modalTargetStudent}
             user={user}
             onSuccess={reloadData}
@@ -389,7 +417,7 @@ export default function App() {
               setShowUjianModal(false);
               setModalTargetStudent(undefined);
             }}
-            students={students}
+            students={getAuthorizedStudents(user, students)}
             initialStudent={modalTargetStudent}
             onSuccess={reloadData}
             onNotify={addToast}
@@ -398,19 +426,7 @@ export default function App() {
           <PresensiModal
             isOpen={showPresensiModal}
             onClose={() => setShowPresensiModal(false)}
-            students={
-              user.role === 'admin'
-                ? students
-                : user.role === 'guru_ngaji'
-                ? students.filter(
-                    s =>
-                      s.pengajar.toLowerCase().includes(user.nama.toLowerCase()) ||
-                      (user.assignedGroup && s.kelasBTQ.toLowerCase().includes(user.assignedGroup.toLowerCase()))
-                  )
-                : user.role === 'guru_tahfidz'
-                ? students.filter(s => s.isTahfidz)
-                : students.filter(s => s.kelas === (user.assignedClass || '7D'))
-            }
+            students={getAuthorizedStudents(user, students)}
             onSuccess={reloadData}
             onNotify={addToast}
           />
@@ -452,7 +468,13 @@ export default function App() {
               setDeleteTarget(null);
             }}
             onConfirm={handleConfirmDelete}
-            title={deleteTarget?.type === 'Siswa' ? 'Hapus Data Siswa' : 'Hapus Guru Pengajar'}
+            title={
+              deleteTarget?.type === 'Semua Data'
+                ? 'Kosongkan Semua Data'
+                : deleteTarget?.type === 'Siswa'
+                ? 'Hapus Data Siswa'
+                : 'Hapus Guru Pengajar'
+            }
             itemName={deleteTarget?.name || ''}
             itemType={deleteTarget?.type || 'Siswa'}
           />

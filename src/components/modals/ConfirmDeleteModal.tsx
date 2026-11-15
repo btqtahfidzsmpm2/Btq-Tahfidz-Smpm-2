@@ -7,7 +7,7 @@ interface ConfirmDeleteModalProps {
   onConfirm: () => void;
   title: string;
   itemName: string;
-  itemType: 'Siswa' | 'Guru Pengajar';
+  itemType: 'Siswa' | 'Guru Pengajar' | 'Semua Data';
   warningText?: string;
 }
 

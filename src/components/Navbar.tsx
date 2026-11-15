@@ -97,7 +97,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                   <span className="font-mono lowercase">@{user.username}</span>
                   {' · '}
                   <span className="uppercase">
-                    {user.role.replace('_', ' ')}
+                    {user.role.replace(/_/g, ' ')}
                     {user.assignedClass ? ` ${user.assignedClass}` : ''}
                   </span>
                 </p>

@@ -63,6 +63,7 @@ export const AccountSecurityPanel: React.FC<AccountSecurityPanelProps> = ({
   const [createUsername, setCreateUsername] = useState('');
   const [createPassword, setCreatePassword] = useState('');
   const [createGroup, setCreateGroup] = useState('');
+  const [createTahfidzGroup, setCreateTahfidzGroup] = useState('');
   const [createClass, setCreateClass] = useState(HOMEROOM_CLASSES[0]);
 
   const metrics = useMemo(() => {
@@ -86,6 +87,7 @@ export const AccountSecurityPanel: React.FC<AccountSecurityPanelProps> = ({
         !acc.nama.toLowerCase().includes(q) &&
         !acc.username.toLowerCase().includes(q) &&
         !(acc.assignedGroup || '').toLowerCase().includes(q) &&
+        !(acc.assignedTahfidzGroup || '').toLowerCase().includes(q) &&
         !(acc.assignedClass || '').toLowerCase().includes(q)
       ) {
         return false;
@@ -191,6 +193,10 @@ export const AccountSecurityPanel: React.FC<AccountSecurityPanelProps> = ({
       nama: createNama,
       role: createRole,
       assignedGroup: createRole === 'guru_ngaji' ? createGroup : undefined,
+      assignedTahfidzGroup:
+        createRole === 'guru_tahfidz'
+          ? createTahfidzGroup || 'HALAQAH TAHFIDZ'
+          : undefined,
       assignedClass: createRole === 'wali_kelas' ? createClass : undefined
     });
 
@@ -210,6 +216,7 @@ export const AccountSecurityPanel: React.FC<AccountSecurityPanelProps> = ({
     setCreateUsername('');
     setCreatePassword('');
     setCreateGroup('');
+    setCreateTahfidzGroup('');
     onRefreshAccounts();
   };
 
@@ -471,9 +478,17 @@ export const AccountSecurityPanel: React.FC<AccountSecurityPanelProps> = ({
                           >
                             {getRoleLabel(acc.role)}
                           </div>
-                          {(acc.assignedGroup || acc.assignedClass) && (
-                            <div className="text-[11px] text-slate-500">
-                              {acc.assignedGroup || `Kelas ${acc.assignedClass}`}
+                          {(acc.assignedGroup || acc.assignedTahfidzGroup || acc.assignedClass) && (
+                            <div className="text-[11px] text-slate-500 space-y-0.5">
+                              {acc.role === 'guru_ngaji' && acc.assignedGroup && (
+                                <div>Kelas BTQ: {acc.assignedGroup}</div>
+                              )}
+                              {acc.role === 'guru_tahfidz' && (
+                                <div className="text-amber-700 font-medium">
+                                  Halaqah Tahfidz: {acc.assignedTahfidzGroup || acc.assignedGroup || 'HALAQAH TAHFIDZ'}
+                                </div>
+                              )}
+                              {acc.assignedClass && <div>Kelas {acc.assignedClass}</div>}
                             </div>
                           )}
                         </td>
@@ -815,8 +830,8 @@ export const AccountSecurityPanel: React.FC<AccountSecurityPanelProps> = ({
                   className="w-full p-2 border border-slate-300 rounded-xl text-xs font-semibold bg-white"
                 >
                   <option value="admin">Administrator Utama</option>
-                  <option value="guru_ngaji">Guru Ngaji / BTQ</option>
-                  <option value="guru_tahfidz">Guru Tahfidz</option>
+                  <option value="guru_ngaji">Guru Ngaji (Kelas BTQ)</option>
+                  <option value="guru_tahfidz">Guru Tahfidz (Halaqah Tahfidz)</option>
                   <option value="wali_kelas">Wali Kelas Formal</option>
                 </select>
               </div>
@@ -835,12 +850,29 @@ export const AccountSecurityPanel: React.FC<AccountSecurityPanelProps> = ({
 
               {createRole === 'guru_ngaji' && (
                 <div>
-                  <label className="text-xs font-bold text-slate-700 block mb-1">Kelompok BTQ Binaan:</label>
+                  <label className="text-xs font-bold text-slate-700 block mb-1">
+                    Kelompok / Kelas BTQ Binaan (pisahkan koma jika 2 kelas):
+                  </label>
                   <input
                     type="text"
                     value={createGroup}
                     onChange={e => setCreateGroup(e.target.value)}
-                    placeholder="Misal: TILAWATI 4 PA"
+                    placeholder="Misal: TILAWATI 4 PA, TILAWATI 5 PA"
+                    className="w-full p-2 border border-slate-300 rounded-xl text-xs bg-white"
+                  />
+                </div>
+              )}
+
+              {createRole === 'guru_tahfidz' && (
+                <div>
+                  <label className="text-xs font-bold text-slate-700 block mb-1">
+                    Kelas / Halaqah Program Tahfidz:
+                  </label>
+                  <input
+                    type="text"
+                    value={createTahfidzGroup}
+                    onChange={e => setCreateTahfidzGroup(e.target.value)}
+                    placeholder="Misal: HALAQAH TAHFIDZ JUZ 30"
                     className="w-full p-2 border border-slate-300 rounded-xl text-xs bg-white"
                   />
                 </div>

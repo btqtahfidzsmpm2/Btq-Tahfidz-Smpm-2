@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Student, BacaanRecord, TahfidzRecord, AbsensiRecord } from '../types';
-import { Search, Printer, BookOpen, Award, CheckCircle2, User, ChevronRight } from 'lucide-react';
+import { Search, BookOpen, Award, CheckCircle2, User } from 'lucide-react';
 
 interface PublicPortalProps {
   students: Student[];
@@ -117,64 +117,28 @@ export const PublicPortal: React.FC<PublicPortalProps> = ({
             </button>
           </div>
 
-          {/* Quick Demo Chips */}
+          {/* Dynamic Student Database Status */}
           <div className="pt-2 text-xs text-emerald-200 flex flex-wrap items-center justify-center gap-2">
-            <span className="font-medium text-emerald-300">Contoh Siswa:</span>
-            <button
-              onClick={() => {
-                setQuery('0082600001');
-                handleSearch('0082600001');
-              }}
-              className="underline hover:text-white font-semibold transition-colors"
-            >
-              Adarazahra (7D · Tahfidz)
-            </button>
-            <span aria-hidden="true">·</span>
-            <button
-              onClick={() => {
-                setQuery('0082600011');
-                handleSearch('0082600011');
-              }}
-              className="underline hover:text-white font-semibold transition-colors"
-            >
-              Aditya Syam (7A)
-            </button>
-            <span aria-hidden="true">·</span>
-            <button
-              onClick={() => {
-                setQuery('0062400111');
-                handleSearch('0062400111');
-              }}
-              className="underline hover:text-white font-semibold transition-colors"
-            >
-              Mikayla (9E · Khatam 5 Juz)
-            </button>
+            {students.length > 0 ? (
+              <span>
+                Tersedia <strong className="text-amber-300">{students.length}</strong> data siswa aktif — masukkan NISN atau nama lengkap putra-putri Anda.
+              </span>
+            ) : (
+              <span className="text-emerald-100/90">
+                Data siswa belum diimpor. Silakan login sebagai <strong>Admin</strong> dan gunakan menu <strong>Import Format Data</strong> untuk mengisi database siswa & pengajar.
+              </span>
+            )}
           </div>
         </div>
       </section>
 
-      {/* Result Card: Rapor Mutaba'ah Siswa */}
+      {/* Result Card: Mutaba'ah Siswa (Tampilan Online Wali Murid) */}
       {selectedStudent ? (
-        <section className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 sm:p-8 space-y-6 print:border-none print:shadow-none print:p-0">
-          
-          {/* Print Kop Surat (Visible during print) */}
-          <div className="hidden print:flex items-center justify-between border-b-2 border-slate-800 pb-4 mb-6">
-            <img
-              src="/assets/logo_spemda_quran.png"
-              alt="Logo SMP Muhammadiyah 2 Surabaya & Fashahah Balaghah Qur'an"
-              className="h-14 w-auto object-contain"
-            />
-            <div className="text-right">
-              <h2 className="font-black text-sm text-slate-900 tracking-tight">RAPOR MUTABA'AH AL-QUR'AN & TAHFIDZ</h2>
-              <p className="text-xs font-bold text-slate-700">SMP MUHAMMADIYAH 2 SURABAYA</p>
-              <p className="text-[10px] text-slate-500">Tahun Ajaran 2025/2026 · Terakreditasi A</p>
-            </div>
-          </div>
-
-          <div className="border-b border-slate-200 pb-6 print:pb-4">
+        <section className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 sm:p-8 space-y-6">
+          <div className="border-b border-slate-200 pb-6">
             <div className="flex flex-col sm:flex-row justify-between sm:items-start gap-4">
               <div className="flex items-start gap-4">
-                <div className="w-14 h-14 rounded-xl bg-emerald-100 text-emerald-800 flex items-center justify-center font-bold text-xl shrink-0 print:border print:border-emerald-800">
+                <div className="w-14 h-14 rounded-xl bg-emerald-100 text-emerald-800 flex items-center justify-center font-bold text-xl shrink-0">
                   <User className="w-7 h-7" />
                 </div>
                 <div>
@@ -202,17 +166,6 @@ export const PublicPortal: React.FC<PublicPortalProps> = ({
                     <span>Wali Kelas: <strong className="text-slate-800">{selectedStudent.waliKelas}</strong></span>
                   </p>
                 </div>
-              </div>
-
-              {/* Action Button: Print */}
-              <div className="no-print self-start sm:self-auto">
-                <button
-                  onClick={() => window.print()}
-                  className="px-4 py-2 text-xs font-bold text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors flex items-center gap-2 border border-slate-300"
-                >
-                  <Printer className="w-4 h-4 text-slate-700" />
-                  <span>Cetak Rapor Mutaba'ah (PDF)</span>
-                </button>
               </div>
             </div>
           </div>
@@ -382,10 +335,12 @@ export const PublicPortal: React.FC<PublicPortalProps> = ({
                     <Award className="w-4 h-4 text-amber-600" />
                     <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wide">
                       Mutaba'ah Setoran Hafalan Siswa Tahfidz
+                      {selectedStudent.halaqahTahfidz ? ` · ${selectedStudent.halaqahTahfidz}` : ''}
                     </h3>
                   </div>
                   <span className="text-[11px] text-slate-500 font-mono">
                     Target: {selectedStudent.targetJuz || 'Juz 30'}
+                    {selectedStudent.pembimbingTahfidz ? ` · Pembimbing: ${selectedStudent.pembimbingTahfidz}` : ''}
                   </span>
                 </div>
 
@@ -467,31 +422,6 @@ export const PublicPortal: React.FC<PublicPortalProps> = ({
                 </div>
               </div>
             )}
-          </div>
-
-          {/* Printable Signature Section (Shows on printed PDF / Print preview) */}
-          <div className="hidden print:grid grid-cols-3 gap-6 pt-12 text-center text-xs text-slate-800">
-            <div>
-              <p>Mengetahui,</p>
-              <p className="font-bold mt-1">Kepala Sekolah SPEMDA</p>
-              <div className="h-16"></div>
-              <p className="font-bold underline">Ustadzah Dra. Ida Indahwati Waliulu</p>
-              <p className="text-[10px] text-slate-500">NBM. 883.219</p>
-            </div>
-            <div>
-              <p>Koordinator BTQ & Tahfidz,</p>
-              <p className="font-bold mt-1">SMP Muhammadiyah 2</p>
-              <div className="h-16"></div>
-              <p className="font-bold underline">Ustadz Khoirul Anwar, S.Ag</p>
-              <p className="text-[10px] text-slate-500">Penguji Munaqosyah</p>
-            </div>
-            <div>
-              <p>Surabaya, 28 Maret 2026</p>
-              <p className="font-bold mt-1">Ustadz/ah Pengajar,</p>
-              <div className="h-16"></div>
-              <p className="font-bold underline">{selectedStudent.pengajar}</p>
-              <p className="text-[10px] text-slate-500">Pembimbing Halaqah</p>
-            </div>
           </div>
 
         </section>

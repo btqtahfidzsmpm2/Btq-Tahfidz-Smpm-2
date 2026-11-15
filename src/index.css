@@ -7,14 +7,28 @@
 }
 
 @media print {
+  @page {
+    size: A4 portrait;
+    margin: 10mm 12mm;
+  }
   .no-print {
     display: none !important;
   }
   .print-only {
     display: block !important;
   }
+  .rapor-page-break {
+    page-break-after: always;
+    break-after: page;
+  }
+  .rapor-page-break:last-child {
+    page-break-after: auto;
+    break-after: auto;
+  }
   body {
     background: white !important;
     color: black !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
   }
 }

@@ -120,12 +120,12 @@ export const LoginModal: React.FC<LoginModalProps> = ({
             <label className="text-[11px] font-bold text-slate-600 uppercase tracking-wide block">
               Kategori Akun
             </label>
-            <div className="grid grid-cols-5 gap-1 p-1 bg-slate-100 rounded-xl">
+            <div className="grid grid-cols-3 sm:grid-cols-5 gap-1 p-1 bg-slate-100 rounded-xl">
               {[
                 { key: 'all', label: 'Semua' },
                 { key: 'admin', label: 'Admin' },
-                { key: 'guru_ngaji', label: 'Ngaji' },
-                { key: 'guru_tahfidz', label: 'Tahfidz' },
+                { key: 'guru_ngaji', label: 'Guru Ngaji' },
+                { key: 'guru_tahfidz', label: 'Guru Tahfidz' },
                 { key: 'wali_kelas', label: 'Wali Kls' }
               ].map(tab => (
                 <button
@@ -135,7 +135,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                     setRoleFilter(tab.key as Role | 'all');
                     setError(null);
                   }}
-                  className={`py-1.5 px-1 rounded-lg text-[11px] font-bold transition-colors ${
+                  className={`py-1.5 px-1 rounded-lg text-[10px] sm:text-[11px] font-bold transition-colors whitespace-nowrap ${
                     roleFilter === tab.key
                       ? 'bg-emerald-800 text-white shadow-2xs'
                       : 'text-slate-600 hover:text-slate-900'

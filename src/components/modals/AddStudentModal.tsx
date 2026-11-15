@@ -26,9 +26,9 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({
   const [gender, setGender] = useState<'L' | 'P'>('P');
   const [kelas, setKelas] = useState(HOMEROOM_CLASSES[0]);
   const [kelasBTQ, setKelasBTQ] = useState("AL-QUR'AN PI D");
-  const [pengajar, setPengajar] = useState(teachersList[0] || 'UMI KULSUM');
-  const [ruangan, setRuangan] = useState('RUANGAN 7E');
-  const [waliKelas, setWaliKelas] = useState('USTADZAH NURUL M.PD');
+  const [pengajar, setPengajar] = useState(teachersList[0] || '');
+  const [ruangan, setRuangan] = useState('RUANGAN 7A');
+  const [waliKelas, setWaliKelas] = useState('');
   const [isTahfidz, setIsTahfidz] = useState(false);
   const [targetJuz, setTargetJuz] = useState('Juz 30');
 
@@ -50,9 +50,9 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({
       setGender('P');
       setKelas(HOMEROOM_CLASSES[0]);
       setKelasBTQ("AL-QUR'AN PI D");
-      setPengajar(teachersList[0] || 'UMI KULSUM');
-      setRuangan('RUANGAN 7E');
-      setWaliKelas('USTADZAH NURUL M.PD');
+      setPengajar(teachersList[0] || '');
+      setRuangan('RUANGAN 7A');
+      setWaliKelas('');
       setIsTahfidz(false);
       setTargetJuz('Juz 30');
     }
@@ -247,17 +247,29 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({
 
           <div>
             <label className="text-xs font-bold text-slate-700 block mb-1">Ustadz / Ustadzah Pengajar:</label>
-            <select
-              value={pengajar}
-              onChange={e => setPengajar(e.target.value)}
-              className="w-full p-2 border border-slate-300 rounded-lg text-xs font-medium bg-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
-            >
-              {teachersList.map(t => (
-                <option key={t} value={t}>
-                  {t}
-                </option>
-              ))}
-            </select>
+            {teachersList.length > 0 ? (
+              <select
+                value={pengajar}
+                onChange={e => setPengajar(e.target.value)}
+                required
+                className="w-full p-2 border border-slate-300 rounded-lg text-xs font-medium bg-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              >
+                {teachersList.map(t => (
+                  <option key={t} value={t}>
+                    {t}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <input
+                type="text"
+                value={pengajar}
+                onChange={e => setPengajar(e.target.value)}
+                placeholder="Ketik nama ustadz/ustadzah pengajar..."
+                required
+                className="w-full p-2 border border-slate-300 rounded-lg text-xs font-medium uppercase bg-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              />
+            )}
           </div>
 
           {/* Tahfidz Checkbox */}

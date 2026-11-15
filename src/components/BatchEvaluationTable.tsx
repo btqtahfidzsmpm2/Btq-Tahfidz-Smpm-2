@@ -1,6 +1,7 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { Student, UserSession } from '../types';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { Student, UserSession, BacaanRecord, AbsensiRecord } from '../types';
 import { storage } from '../services/storage';
+import { isValidBtqClass } from '../utils/access';
 import {
   Save,
   Check,
@@ -9,14 +10,16 @@ import {
   BookOpen,
   UserCheck,
   Sparkles,
-  Award,
-  ChevronRight,
-  Filter
+  Filter,
+  AlertCircle,
+  Zap
 } from 'lucide-react';
 
 interface BatchEvaluationTableProps {
   user: UserSession;
   students: Student[];
+  bacaanList?: BacaanRecord[];
+  absensiList?: AbsensiRecord[];
   onNotify: (type: 'success' | 'error' | 'info', title: string, desc?: string) => void;
   onDataUpdated: () => void;
 }
@@ -42,7 +45,7 @@ interface EvaluationRow {
 
 const COMMON_NOTES = [
   'Lancar & tartil fashahah',
-  'Perhatikan panjang mad thabi\'i',
+  "Perhatikan panjang mad thabi'i",
   'Dengung ghunnah diperjelas',
   'Latihan makhraj huruf tebal-tipis',
   'Waqaf & washal tertib',
@@ -61,9 +64,60 @@ const TILAWATI_LEVELS = [
 
 const JUZ_LEVELS = Array.from({ length: 30 }, (_, i) => `Juz ${i + 1}`);
 
+function buildDefaultRow(
+  s: Student,
+  existingBacaan?: BacaanRecord,
+  existingAbsensi?: AbsensiRecord
+): EvaluationRow {
+  const last = s.capaianTerakhir;
+  let tipe: 'Tilawati Remaja' | "Al-Qur'an" = 'Tilawati Remaja';
+  let jilid = 'Jilid 4';
+
+  if (existingBacaan) {
+    tipe = existingBacaan.tipe;
+    jilid = existingBacaan.jilid || (tipe === "Al-Qur'an" ? 'Juz 1' : 'Jilid 4');
+  } else if (last?.tingkat) {
+    if (last.tingkat.includes("Qur'an") || last.tingkat.includes('Juz')) {
+      tipe = "Al-Qur'an";
+      const matchJuz = last.tingkat.match(/Juz\s*\d+/i);
+      jilid = matchJuz ? matchJuz[0] : 'Juz 1';
+    } else {
+      tipe = 'Tilawati Remaja';
+      const matchJilid = last.tingkat.match(/Jilid\s*\d+/i);
+      jilid = matchJilid ? matchJilid[0] : 'Jilid 4';
+    }
+  } else if (s.kelasBTQ.includes("QUR'AN") || s.kelasBTQ.includes('KHATAM')) {
+    tipe = "Al-Qur'an";
+    jilid = 'Juz 1';
+  }
+
+  return {
+    nisn: s.nisn,
+    nama: s.nama,
+    gender: s.gender,
+    kelas: s.kelas,
+    kelasBTQ: s.kelasBTQ,
+    isTahfidz: s.isTahfidz,
+    capaianSebelumnya: last
+      ? `${last.tingkat} · ${last.halamanAyat} (${last.nilai})`
+      : 'Belum ada catatan',
+    tipe,
+    jilid,
+    halaman: existingBacaan?.halaman || last?.halamanAyat || 'Halaman 1',
+    nilai: existingBacaan?.nilai || last?.nilai || 'A',
+    catatan: existingBacaan?.catatan || '',
+    statusPresensi: existingAbsensi?.status || 'Hadir',
+    isDirty: false,
+    isSaving: false,
+    savedAt: existingBacaan ? 'Tersimpan' : null
+  };
+}
+
 export const BatchEvaluationTable: React.FC<BatchEvaluationTableProps> = ({
   user,
   students,
+  bacaanList = [],
+  absensiList = [],
   onNotify,
   onDataUpdated
 }) => {
@@ -73,14 +127,17 @@ export const BatchEvaluationTable: React.FC<BatchEvaluationTableProps> = ({
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [filterBTQ, setFilterBTQ] = useState<string>('');
   const [filterKelasReguler, setFilterKelasReguler] = useState<string>('');
+  const [autoSaveEnabled, setAutoSaveEnabled] = useState<boolean>(true);
   const [rows, setRows] = useState<Record<string, EvaluationRow>>({});
   const [isBulkSaving, setIsBulkSaving] = useState(false);
 
-  // Dynamic list of unique BTQ classes from students
+  const prevTanggalRef = useRef<string>(tanggal);
+
+  // Dynamic list of unique BTQ classes from students (excluding Tahfidz placeholders)
   const availableKelasBTQ = useMemo(() => {
     const set = new Set<string>();
     students.forEach(s => {
-      if (s.kelasBTQ && s.kelasBTQ.trim() && s.kelasBTQ !== '-') {
+      if (isValidBtqClass(s.kelasBTQ)) {
         set.add(s.kelasBTQ.trim());
       }
     });
@@ -98,54 +155,55 @@ export const BatchEvaluationTable: React.FC<BatchEvaluationTableProps> = ({
     return Array.from(set).sort();
   }, [students]);
 
-  // Parse initial rows from student data
+  // Sync student data & daily records without wiping unsaved edits or savedAt timestamps
   useEffect(() => {
-    const initialMap: Record<string, EvaluationRow> = {};
+    const tanggalChanged = prevTanggalRef.current !== tanggal;
+    prevTanggalRef.current = tanggal;
 
-    students.forEach(s => {
-      const last = s.capaianTerakhir;
-      let tipe: 'Tilawati Remaja' | "Al-Qur'an" = 'Tilawati Remaja';
-      let jilid = 'Jilid 4';
-
-      if (last?.tingkat) {
-        if (last.tingkat.includes("Qur'an") || last.tingkat.includes('Juz')) {
-          tipe = "Al-Qur'an";
-          const matchJuz = last.tingkat.match(/Juz\s*\d+/i);
-          jilid = matchJuz ? matchJuz[0] : 'Juz 1';
-        } else {
-          tipe = 'Tilawati Remaja';
-          const matchJilid = last.tingkat.match(/Jilid\s*\d+/i);
-          jilid = matchJilid ? matchJilid[0] : 'Jilid 4';
-        }
-      } else if (s.kelasBTQ.includes("QUR'AN") || s.kelasBTQ.includes('KHATAM')) {
-        tipe = "Al-Qur'an";
-        jilid = 'Juz 1';
+    const bacaanByNisn = new Map<string, BacaanRecord>();
+    bacaanList.forEach(b => {
+      if (b.tanggal === tanggal && !bacaanByNisn.has(b.nisn)) {
+        bacaanByNisn.set(b.nisn, b);
       }
-
-      initialMap[s.nisn] = {
-        nisn: s.nisn,
-        nama: s.nama,
-        gender: s.gender,
-        kelas: s.kelas,
-        kelasBTQ: s.kelasBTQ,
-        isTahfidz: s.isTahfidz,
-        capaianSebelumnya: last
-          ? `${last.tingkat} · ${last.halamanAyat} (${last.nilai})`
-          : 'Belum ada catatan',
-        tipe,
-        jilid,
-        halaman: last?.halamanAyat || 'Halaman 1',
-        nilai: last?.nilai || 'A',
-        catatan: '',
-        statusPresensi: 'Hadir',
-        isDirty: false,
-        isSaving: false,
-        savedAt: null
-      };
     });
 
-    setRows(initialMap);
-  }, [students]);
+    const absensiByNisn = new Map<string, AbsensiRecord>();
+    absensiList.forEach(a => {
+      if (a.tanggal === tanggal && a.sesi === 'btq' && !absensiByNisn.has(a.nisn)) {
+        absensiByNisn.set(a.nisn, a);
+      }
+    });
+
+    setRows(prev => {
+      const nextMap: Record<string, EvaluationRow> = {};
+
+      students.forEach(s => {
+        const existingRow = prev[s.nisn];
+        const existingBacaan = bacaanByNisn.get(s.nisn);
+        const existingAbs = absensiByNisn.get(s.nisn);
+
+        if (existingRow && !tanggalChanged) {
+          const freshCapaian = s.capaianTerakhir
+            ? `${s.capaianTerakhir.tingkat} · ${s.capaianTerakhir.halamanAyat} (${s.capaianTerakhir.nilai})`
+            : 'Belum ada catatan';
+
+          nextMap[s.nisn] = {
+            ...existingRow,
+            nama: s.nama,
+            gender: s.gender,
+            kelas: s.kelas,
+            kelasBTQ: s.kelasBTQ,
+            isTahfidz: s.isTahfidz,
+            capaianSebelumnya: freshCapaian
+          };
+        } else {
+          nextMap[s.nisn] = buildDefaultRow(s, existingBacaan, existingAbs);
+        }
+      });
+
+      return nextMap;
+    });
+  }, [students, tanggal, bacaanList, absensiList]);
 
   // Filtered rows for viewing based on Kelas BTQ and Kelas Reguler
   const filteredList = useMemo(() => {
@@ -168,54 +226,90 @@ export const BatchEvaluationTable: React.FC<BatchEvaluationTableProps> = ({
     });
   }, [students, searchTerm, filterBTQ, filterKelasReguler]);
 
-  // Update row in state and trigger real-time save
-  const updateRow = (nisn: string, patch: Partial<EvaluationRow>, autoSave: boolean = true) => {
+  // Count unsaved changes
+  const unsavedTotalCount = useMemo(() => {
+    return (Object.values(rows) as EvaluationRow[]).filter(r => r.isDirty).length;
+  }, [rows]);
+
+  // Save a single row immediately (manual Simpan click, Enter key, or auto-save trigger)
+  const persistSingleRow = (rowToSave: EvaluationRow, showToast: boolean = false) => {
+    const nowTime = new Date().toLocaleTimeString('id-ID', {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit'
+    });
+
+    storage.updateSingleStudentEvaluation(
+      {
+        nisn: rowToSave.nisn,
+        tanggal,
+        tipe: rowToSave.tipe,
+        jilid: rowToSave.jilid,
+        halaman: rowToSave.halaman.trim() || 'Halaman 1',
+        nilai: rowToSave.nilai,
+        catatan: rowToSave.catatan.trim() || "Mutaba'ah tabel harian",
+        statusPresensi: rowToSave.statusPresensi
+      },
+      user.nama
+    );
+
     setRows(prev => {
-      const current = prev[nisn];
+      const current = prev[rowToSave.nisn];
       if (!current) return prev;
-
-      const updated = {
-        ...current,
-        ...patch,
-        isDirty: true
-      };
-
-      if (autoSave) {
-        // Save immediately to storage in real-time
-        try {
-          storage.updateSingleStudentEvaluation(
-            {
-              nisn: updated.nisn,
-              tanggal,
-              tipe: updated.tipe,
-              jilid: updated.jilid,
-              halaman: updated.halaman,
-              nilai: updated.nilai,
-              catatan: updated.catatan || 'Mutaba\'ah tabel harian',
-              statusPresensi: updated.statusPresensi
-            },
-            user.nama
-          );
-
-          updated.isDirty = false;
-          updated.savedAt = new Date().toLocaleTimeString('id-ID', {
-            hour: '2-digit',
-            minute: '2-digit',
-            second: '2-digit'
-          });
-        } catch {
-          // ignore
-        }
-      }
-
       return {
         ...prev,
-        [nisn]: updated
+        [rowToSave.nisn]: {
+          ...current,
+          ...rowToSave,
+          isDirty: false,
+          isSaving: false,
+          savedAt: nowTime
+        }
       };
     });
 
-    if (autoSave) {
-      onDataUpdated();
+    onDataUpdated();
+
+    if (showToast) {
+      onNotify(
+        'success',
+        `Penilaian Disimpan: ${rowToSave.nama}`,
+        `${rowToSave.tipe} ${rowToSave.jilid} · ${rowToSave.halaman} · Nilai ${rowToSave.nilai} · Presensi ${rowToSave.statusPresensi}.`
+      );
+    }
+  };
+
+  // Explicit Save button handler per row
+  const handleSaveRow = (nisn: string) => {
+    const row = rows[nisn];
+    if (!row) return;
+    persistSingleRow(row, true);
+  };
+
+  // Update row in state and optionally trigger real-time save
+  const updateRow = (
+    nisn: string,
+    patch: Partial<EvaluationRow>,
+    canAutoSave: boolean = true
+  ) => {
+    const current = rows[nisn];
+    if (!current) return;
+
+    const updated: EvaluationRow = {
+      ...current,
+      ...patch,
+      isDirty: true
+    };
+
+    const shouldSaveNow = canAutoSave && autoSaveEnabled;
+
+    if (shouldSaveNow) {
+      persistSingleRow(updated, false);
+    } else {
+      setRows(prev => ({
+        ...prev,
+        [nisn]: updated
+      }));
     }
   };
 
@@ -225,46 +319,72 @@ export const BatchEvaluationTable: React.FC<BatchEvaluationTableProps> = ({
     if (!current) return;
 
     const pageMatch = current.halaman.match(/\d+/);
-    if (pageMatch) {
-      const nextNum = parseInt(pageMatch[0], 10) + 1;
-      const nextText = current.halaman.replace(/\d+/, nextNum.toString());
-      updateRow(nisn, { halaman: nextText }, true);
-      onNotify('info', `Halaman Naik: ${current.nama}`, `Menjadi ${nextText} (Tersimpan otomatis).`);
+    const nextText = pageMatch
+      ? current.halaman.replace(/\d+/, (parseInt(pageMatch[0], 10) + 1).toString())
+      : `${current.halaman} +1`;
+
+    if (autoSaveEnabled) {
+      persistSingleRow({ ...current, halaman: nextText }, false);
+      onNotify('info', `Halaman Naik: ${current.nama}`, `Menjadi ${nextText} (Tersimpan).`);
     } else {
-      const nextText = `${current.halaman} +1`;
-      updateRow(nisn, { halaman: nextText }, true);
+      updateRow(nisn, { halaman: nextText }, false);
     }
   };
 
-  // Set all students to Hadir
+  // Set all displayed students to Hadir
   const handleSetAllHadir = () => {
-    const updated: Record<string, EvaluationRow> = { ...rows };
-    const nowTime = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
-
-    filteredList.forEach(s => {
-      if (updated[s.nisn]) {
-        updated[s.nisn] = {
-          ...updated[s.nisn],
-          statusPresensi: 'Hadir',
-          savedAt: nowTime
-        };
-      }
+    const nowTime = new Date().toLocaleTimeString('id-ID', {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit'
     });
 
-    setRows(updated);
+    setRows(prev => {
+      const updated = { ...prev };
+      filteredList.forEach(s => {
+        if (updated[s.nisn]) {
+          updated[s.nisn] = {
+            ...updated[s.nisn],
+            statusPresensi: 'Hadir',
+            isDirty: autoSaveEnabled ? updated[s.nisn].isDirty : true,
+            savedAt: autoSaveEnabled ? nowTime : updated[s.nisn].savedAt
+          };
+        }
+      });
+      return updated;
+    });
 
-    // Save batch attendance
-    storage.recordAttendanceBatch(
-      filteredList.map(s => s.nisn),
-      'btq',
-      tanggal
-    );
-
-    onNotify('success', 'Presensi Diperbarui', `Seluruh ${filteredList.length} santri ditandai HADIR.`);
-    onDataUpdated();
+    if (autoSaveEnabled) {
+      const payload = filteredList
+        .map(s => rows[s.nisn])
+        .filter((r): r is EvaluationRow => Boolean(r))
+        .map(r => ({
+          nisn: r.nisn,
+          tanggal,
+          tipe: r.tipe,
+          jilid: r.jilid,
+          halaman: r.halaman.trim() || 'Halaman 1',
+          nilai: r.nilai,
+          catatan: r.catatan.trim() || "Mutaba'ah tabel harian",
+          statusPresensi: 'Hadir' as const
+        }));
+      storage.saveBatchBacaanEvaluations(payload, user.nama);
+      onDataUpdated();
+      onNotify(
+        'success',
+        'Presensi Disimpan',
+        `Seluruh ${filteredList.length} santri ditandai HADIR & tersimpan.`
+      );
+    } else {
+      onNotify(
+        'info',
+        'Presensi Diatur Hadir',
+        `${filteredList.length} santri diatur HADIR. Klik "Simpan Semua" untuk menyimpan.`
+      );
+    }
   };
 
-  // Set all students to Nilai A
+  // Set all displayed students to Nilai A
   const handleSetAllNilaiA = () => {
     setRows(prev => {
       const copy = { ...prev };
@@ -280,22 +400,47 @@ export const BatchEvaluationTable: React.FC<BatchEvaluationTableProps> = ({
       return copy;
     });
 
-    onNotify('info', 'Nilai Diatur', `Nilai ${filteredList.length} santri diatur ke Mumtaz (A). Klik 'Simpan Semua' untuk mengonfirmasi.`);
+    onNotify(
+      'info',
+      'Nilai Diatur ke Mumtaz (A)',
+      `${filteredList.length} santri diatur ke A. Klik "Simpan Perubahan" untuk menyimpan ke database.`
+    );
   };
 
-  // Save all rows to database in one click
+  // Save displayed rows & any dirty rows in one click
   const handleSaveAll = () => {
+    if (isBulkSaving) return;
     setIsBulkSaving(true);
-    const toSave = Object.values(rows);
+
+    const targetMap = new Map<string, EvaluationRow>();
+    // Include all displayed rows
+    filteredList.forEach(s => {
+      if (rows[s.nisn]) {
+        targetMap.set(s.nisn, rows[s.nisn]);
+      }
+    });
+    // Also include any dirty rows outside active filter so no edits are lost
+    (Object.values(rows) as EvaluationRow[]).forEach(r => {
+      if (r.isDirty) {
+        targetMap.set(r.nisn, r);
+      }
+    });
+
+    const toSave = Array.from(targetMap.values());
+    if (toSave.length === 0) {
+      setIsBulkSaving(false);
+      onNotify('info', 'Tidak Ada Data', 'Tidak ada baris santri untuk disimpan.');
+      return;
+    }
 
     const payload = toSave.map(r => ({
       nisn: r.nisn,
       tanggal,
       tipe: r.tipe,
       jilid: r.jilid,
-      halaman: r.halaman,
+      halaman: r.halaman.trim() || 'Halaman 1',
       nilai: r.nilai,
-      catatan: r.catatan || 'Penilaian lembar mutaba\'ah massal',
+      catatan: r.catatan.trim() || "Penilaian lembar mutaba'ah massal",
       statusPresensi: r.statusPresensi
     }));
 
@@ -309,12 +454,15 @@ export const BatchEvaluationTable: React.FC<BatchEvaluationTableProps> = ({
 
     setRows(prev => {
       const copy = { ...prev };
-      Object.keys(copy).forEach(k => {
-        copy[k] = {
-          ...copy[k],
-          isDirty: false,
-          savedAt: nowTime
-        };
+      toSave.forEach(r => {
+        if (copy[r.nisn]) {
+          copy[r.nisn] = {
+            ...copy[r.nisn],
+            isDirty: false,
+            isSaving: false,
+            savedAt: nowTime
+          };
+        }
       });
       return copy;
     });
@@ -324,7 +472,7 @@ export const BatchEvaluationTable: React.FC<BatchEvaluationTableProps> = ({
     onNotify(
       'success',
       'Penilaian Massal Berhasil Disimpan',
-      `Berhasil memperbarui capaian mutaba'ah dan presensi ${res.savedCount} santri secara real-time.`
+      `Berhasil menyimpan capaian mutaba'ah dan presensi ${res.savedCount} santri untuk tanggal ${tanggal}.`
     );
   };
 
@@ -333,17 +481,23 @@ export const BatchEvaluationTable: React.FC<BatchEvaluationTableProps> = ({
       {/* Top Controls Bar */}
       <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-4">
         <div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <h2 className="text-base font-black text-slate-900 flex items-center gap-1.5">
               <BookOpen className="w-4 h-4 text-emerald-800" />
-              <span>Lembar Penilaian Mutaba'ah Massal (Real-Time)</span>
+              <span>Lembar Penilaian Mutaba'ah Massal</span>
             </h2>
             <span className="text-[11px] font-mono px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-800 font-bold">
               {filteredList.length} Santri
             </span>
+            {unsavedTotalCount > 0 && (
+              <span className="text-[11px] px-2 py-0.5 rounded-md bg-amber-100 text-amber-900 font-bold flex items-center gap-1 border border-amber-300">
+                <AlertCircle className="w-3 h-3 text-amber-700" />
+                <span>{unsavedTotalCount} Belum Disimpan</span>
+              </span>
+            )}
           </div>
           <p className="text-xs text-slate-500 mt-0.5 leading-relaxed">
-            Guru ngaji dapat menilai seluruh santri binaan secara langsung dalam satu tabel. Nilai, jilid, halaman, dan kehadiran tersimpan seketika.
+            Nilai seluruh santri langsung dalam tabel. Klik <strong>Simpan</strong> di tiap baris atau <strong>Simpan Semua Penilaian</strong> untuk menyimpan permanen.
           </p>
         </div>
 
@@ -360,6 +514,31 @@ export const BatchEvaluationTable: React.FC<BatchEvaluationTableProps> = ({
               className="bg-transparent font-mono font-bold text-slate-800 focus:outline-none cursor-pointer"
             />
           </div>
+
+          {/* Toggle Auto-Save vs Manual Save */}
+          <button
+            type="button"
+            onClick={() => {
+              const next = !autoSaveEnabled;
+              setAutoSaveEnabled(next);
+              onNotify(
+                'info',
+                next ? 'Simpan Otomatis Aktif' : 'Mode Simpan Manual Aktif',
+                next
+                  ? 'Perubahan pilihan langsung disimpan otomatis ke sistem.'
+                  : 'Edit semua kolom terlebih dahulu lalu klik Simpan per baris atau Simpan Semua.'
+              );
+            }}
+            className={`px-3 py-1.5 border rounded-xl text-xs font-bold transition-colors shadow-2xs flex items-center gap-1.5 ${
+              autoSaveEnabled
+                ? 'bg-emerald-50 border-emerald-300 text-emerald-800 hover:bg-emerald-100'
+                : 'bg-amber-50 border-amber-300 text-amber-900 hover:bg-amber-100'
+            }`}
+            title="Atur apakah perubahan dropdown langsung tersimpan atau menunggu klik tombol Simpan"
+          >
+            <Zap className="w-3.5 h-3.5" />
+            <span>{autoSaveEnabled ? 'Auto-Simpan: Aktif' : 'Simpan: Manual'}</span>
+          </button>
 
           {/* Quick presets */}
           <button
@@ -386,11 +565,21 @@ export const BatchEvaluationTable: React.FC<BatchEvaluationTableProps> = ({
           <button
             type="button"
             onClick={handleSaveAll}
-            disabled={isBulkSaving}
-            className="px-4 py-2 bg-emerald-800 hover:bg-emerald-900 text-white rounded-xl text-xs font-bold transition-colors shadow-2xs flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+            disabled={isBulkSaving || filteredList.length === 0}
+            className={`px-4 py-2 rounded-xl text-xs font-bold transition-colors shadow-2xs flex items-center gap-1.5 cursor-pointer disabled:opacity-50 ${
+              unsavedTotalCount > 0
+                ? 'bg-amber-500 hover:bg-amber-600 text-slate-950'
+                : 'bg-emerald-800 hover:bg-emerald-900 text-white'
+            }`}
           >
             <Save className="w-3.5 h-3.5" />
-            <span>{isBulkSaving ? 'Menyimpan...' : 'Simpan Semua Penilaian'}</span>
+            <span>
+              {isBulkSaving
+                ? 'Menyimpan...'
+                : unsavedTotalCount > 0
+                ? `Simpan Perubahan (${unsavedTotalCount})`
+                : 'Simpan Semua Penilaian'}
+            </span>
           </button>
         </div>
       </div>
@@ -474,7 +663,7 @@ export const BatchEvaluationTable: React.FC<BatchEvaluationTableProps> = ({
                 <th className="p-3 min-w-[150px]">Halaman / Ayat Baru</th>
                 <th className="p-3 min-w-[110px] text-center">Nilai</th>
                 <th className="p-3 min-w-[220px]">Catatan Tajwid & Makhraj</th>
-                <th className="p-3 min-w-[100px] text-center whitespace-nowrap">Status</th>
+                <th className="p-3 min-w-[150px] text-center whitespace-nowrap">Simpan & Status</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -486,7 +675,11 @@ export const BatchEvaluationTable: React.FC<BatchEvaluationTableProps> = ({
                   return (
                     <tr
                       key={student.nisn}
-                      className="hover:bg-emerald-50/20 transition-colors"
+                      className={`transition-colors ${
+                        row.isDirty
+                          ? 'bg-amber-50/40 hover:bg-amber-50/70'
+                          : 'hover:bg-emerald-50/20'
+                      }`}
                     >
                       {/* No */}
                       <td className="p-3 text-center font-mono text-slate-400 font-semibold">
@@ -612,7 +805,12 @@ export const BatchEvaluationTable: React.FC<BatchEvaluationTableProps> = ({
                             type="text"
                             value={row.halaman}
                             onChange={e => updateRow(student.nisn, { halaman: e.target.value }, false)}
-                            onBlur={() => updateRow(student.nisn, { halaman: row.halaman }, true)}
+                            onKeyDown={e => {
+                              if (e.key === 'Enter') {
+                                e.preventDefault();
+                                handleSaveRow(student.nisn);
+                              }
+                            }}
                             placeholder="Mis: Halaman 18"
                             className="w-full p-1.5 border border-slate-300 rounded-lg text-xs bg-white font-mono focus:outline-none focus:ring-1 focus:ring-emerald-500"
                           />
@@ -659,8 +857,13 @@ export const BatchEvaluationTable: React.FC<BatchEvaluationTableProps> = ({
                             type="text"
                             value={row.catatan}
                             onChange={e => updateRow(student.nisn, { catatan: e.target.value }, false)}
-                            onBlur={() => updateRow(student.nisn, { catatan: row.catatan }, true)}
-                            placeholder="Tulis catatan atau pilih preset..."
+                            onKeyDown={e => {
+                              if (e.key === 'Enter') {
+                                e.preventDefault();
+                                handleSaveRow(student.nisn);
+                              }
+                            }}
+                            placeholder="Tulis catatan lalu klik Simpan..."
                             className="w-full p-1.5 border border-slate-300 rounded-lg text-xs bg-white focus:outline-none focus:ring-1 focus:ring-emerald-500"
                           />
                           {/* Quick note presets */}
@@ -679,20 +882,37 @@ export const BatchEvaluationTable: React.FC<BatchEvaluationTableProps> = ({
                         </div>
                       </td>
 
-                      {/* Real-Time Save Indicator */}
+                      {/* Per-Row Simpan Action & Status */}
                       <td className="p-3 text-center whitespace-nowrap">
-                        {row.savedAt ? (
-                          <div className="inline-flex items-center gap-1 text-[11px] text-emerald-700 font-semibold bg-emerald-50 px-2 py-1 rounded-md border border-emerald-200">
-                            <Check className="w-3.5 h-3.5 text-emerald-600" />
-                            <span>{row.savedAt}</span>
-                          </div>
-                        ) : row.isDirty ? (
-                          <span className="text-[11px] text-amber-600 font-semibold animate-pulse">
-                            Mengetik...
-                          </span>
-                        ) : (
-                          <span className="text-[11px] text-slate-400">Siap</span>
-                        )}
+                        <div className="flex flex-col items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => handleSaveRow(student.nisn)}
+                            disabled={row.isSaving}
+                            className={`w-full px-2.5 py-1.5 rounded-lg text-[11px] font-bold transition-colors flex items-center justify-center gap-1 cursor-pointer ${
+                              row.isDirty
+                                ? 'bg-amber-500 hover:bg-amber-600 text-slate-950 shadow-2xs'
+                                : 'bg-emerald-700 hover:bg-emerald-800 text-white shadow-2xs'
+                            }`}
+                            title="Simpan penilaian & presensi santri ini"
+                          >
+                            <Save className="w-3 h-3" />
+                            <span>{row.isDirty ? 'Simpan*' : 'Simpan'}</span>
+                          </button>
+
+                          {row.isDirty ? (
+                            <span className="text-[10px] text-amber-700 font-semibold">
+                              Belum disimpan
+                            </span>
+                          ) : row.savedAt ? (
+                            <span className="inline-flex items-center gap-1 text-[10px] text-emerald-700 font-semibold">
+                              <Check className="w-3 h-3 text-emerald-600" />
+                              <span>{row.savedAt}</span>
+                            </span>
+                          ) : (
+                            <span className="text-[10px] text-slate-400">Siap dinilai</span>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   );
@@ -710,13 +930,15 @@ export const BatchEvaluationTable: React.FC<BatchEvaluationTableProps> = ({
 
         {/* Footer Summary */}
         <div className="p-3.5 bg-slate-50 border-t border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-600">
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <span className="font-bold text-slate-800">
               {filteredList.length} dari {students.length} santri ditampilkan.
             </span>
             <span className="text-slate-400">·</span>
             <span className="text-emerald-800 font-medium">
-              Sistem Otomatis Menyimpan Riwayat Bacaan & Kehadiran per Baris
+              {unsavedTotalCount > 0
+                ? `${unsavedTotalCount} baris menunggu disimpan (klik Simpan atau Enter)`
+                : 'Semua data tabel siap & tersinkronisasi'}
             </span>
           </div>
 
@@ -724,10 +946,21 @@ export const BatchEvaluationTable: React.FC<BatchEvaluationTableProps> = ({
             <button
               type="button"
               onClick={handleSaveAll}
-              className="px-4 py-1.5 bg-emerald-800 hover:bg-emerald-900 text-white rounded-lg text-xs font-bold transition-colors shadow-2xs flex items-center gap-1.5"
+              disabled={isBulkSaving || filteredList.length === 0}
+              className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-colors shadow-2xs flex items-center gap-1.5 cursor-pointer disabled:opacity-50 ${
+                unsavedTotalCount > 0
+                  ? 'bg-amber-500 hover:bg-amber-600 text-slate-950'
+                  : 'bg-emerald-800 hover:bg-emerald-900 text-white'
+              }`}
             >
               <Save className="w-3.5 h-3.5" />
-              <span>Simpan Seluruh Baris ({filteredList.length} Santri)</span>
+              <span>
+                {isBulkSaving
+                  ? 'Menyimpan...'
+                  : unsavedTotalCount > 0
+                  ? `Simpan Perubahan (${unsavedTotalCount})`
+                  : `Simpan Seluruh Baris (${filteredList.length} Santri)`}
+              </span>
             </button>
           </div>
         </div>

@@ -296,37 +296,56 @@ export const authService = {
       changed = true;
     }
 
-    // 2. Sync Teacher accounts (Guru Ngaji & Guru Tahfidz)
+    // 2. Normalize any legacy guru_ngaji_tahfidz accounts & sync separate Guru Ngaji / Guru Tahfidz accounts
+    for (let i = 0; i < accounts.length; i++) {
+      if ((accounts[i].role as string) === 'guru_ngaji_tahfidz') {
+        const matchedTeacher = teachers.find(
+          t => t.id === accounts[i].teacherId || t.nama.trim().toUpperCase() === accounts[i].nama.trim().toUpperCase()
+        );
+        accounts[i] = {
+          ...accounts[i],
+          role: matchedTeacher ? matchedTeacher.role : 'guru_ngaji',
+          updatedAt: now
+        };
+        changed = true;
+      }
+    }
+
     for (const teacher of teachers) {
+      const targetRole: Teacher['role'] =
+        teacher.role === 'guru_tahfidz' ? 'guru_tahfidz' : 'guru_ngaji';
       const normName = teacher.nama.trim().toUpperCase();
       const idx = accounts.findIndex(
         a =>
           (a.teacherId && a.teacherId === teacher.id) ||
-          ((a.role === 'guru_ngaji' || a.role === 'guru_tahfidz') &&
-            a.nama.trim().toUpperCase() === normName)
+          (a.role === targetRole && a.nama.trim().toUpperCase() === normName)
       );
 
       if (idx !== -1) {
         const acc = accounts[idx];
         const needsUpdate =
           acc.teacherId !== teacher.id ||
-          acc.role !== teacher.role ||
+          acc.role !== targetRole ||
           acc.nama !== normName ||
-          acc.assignedGroup !== teacher.kelompokBTQ;
+          acc.assignedGroup !== teacher.kelompokBTQ ||
+          acc.assignedTahfidzGroup !== teacher.kelompokTahfidz;
 
         if (needsUpdate) {
           accounts[idx] = {
             ...acc,
             teacherId: teacher.id,
-            role: teacher.role,
+            role: targetRole,
             nama: normName,
             assignedGroup: teacher.kelompokBTQ,
+            assignedTahfidzGroup: teacher.kelompokTahfidz,
             updatedAt: now
           };
           changed = true;
         }
       } else {
-        const username = slugifyUsername(teacher.nama, usedUsernames);
+        const baseForSlug =
+          targetRole === 'guru_tahfidz' ? `${teacher.nama} tahfidz` : teacher.nama;
+        const username = slugifyUsername(baseForSlug, usedUsernames);
         const salt = generateSalt();
         const passwordHash = await hashPassword(DEFAULT_PASSWORDS.guru, salt);
         accounts.push({
@@ -334,10 +353,11 @@ export const authService = {
           username,
           passwordHash,
           salt,
-          role: teacher.role,
+          role: targetRole,
           nama: normName,
           teacherId: teacher.id,
           assignedGroup: teacher.kelompokBTQ,
+          assignedTahfidzGroup: teacher.kelompokTahfidz,
           isActive: true,
           isDefaultPassword: true,
           failedAttempts: 0,
@@ -350,11 +370,14 @@ export const authService = {
 
     // Remove auto-synced teacher accounts whose teacher was deleted
     const teacherIds = new Set(teachers.map(t => t.id));
-    const teacherNames = new Set(teachers.map(t => t.nama.trim().toUpperCase()));
+    const teacherRoleNameKeys = new Set(
+      teachers.map(t => `${t.nama.trim().toUpperCase()}::${t.role}`)
+    );
     const filtered = accounts.filter(acc => {
       if (acc.role === 'guru_ngaji' || acc.role === 'guru_tahfidz') {
         if (acc.teacherId) {
-          if (!teacherIds.has(acc.teacherId) && !teacherNames.has(acc.nama.trim().toUpperCase())) {
+          const key = `${acc.nama.trim().toUpperCase()}::${acc.role}`;
+          if (!teacherIds.has(acc.teacherId) && !teacherRoleNameKeys.has(key)) {
             changed = true;
             return false;
           }
@@ -436,11 +459,13 @@ export const authService = {
 
     const account = accounts[idx];
 
-    if (roleFilter && roleFilter !== 'all' && account.role !== roleFilter) {
-      return {
-        ok: false,
-        error: `Akun "${username}" terdaftar sebagai ${account.role.replace('_', ' ').toUpperCase()}, bukan kategori peran yang dipilih.`
-      };
+    if (roleFilter && roleFilter !== 'all') {
+      if (account.role !== roleFilter) {
+        return {
+          ok: false,
+          error: `Akun "${username}" terdaftar sebagai ${account.role.replace(/_/g, ' ').toUpperCase()}, bukan kategori peran yang dipilih.`
+        };
+      }
     }
 
     if (!account.isActive) {
@@ -544,6 +569,7 @@ export const authService = {
       role: account.role,
       nama: account.nama,
       assignedGroup: account.assignedGroup,
+      assignedTahfidzGroup: account.assignedTahfidzGroup,
       assignedClass: account.assignedClass,
       isDefaultPassword: account.isDefaultPassword,
       loginAt: nowMs
@@ -584,6 +610,7 @@ export const authService = {
         nama: acc.nama,
         role: acc.role,
         assignedGroup: acc.assignedGroup,
+        assignedTahfidzGroup: acc.assignedTahfidzGroup,
         assignedClass: acc.assignedClass,
         isDefaultPassword: acc.isDefaultPassword
       };
@@ -737,7 +764,7 @@ export const authService = {
     const existingIdx = accounts.findIndex(
       a =>
         a.teacherId === params.teacher.id ||
-        ((a.role === 'guru_ngaji' || a.role === 'guru_tahfidz') &&
+        (a.role === params.teacher.role &&
           a.nama.trim().toUpperCase() === params.teacher.nama.trim().toUpperCase())
     );
 
@@ -786,6 +813,7 @@ export const authService = {
         role: params.teacher.role,
         nama: params.teacher.nama.trim().toUpperCase(),
         assignedGroup: params.teacher.kelompokBTQ,
+        assignedTahfidzGroup: params.teacher.kelompokTahfidz,
         passwordHash,
         salt,
         isDefaultPassword,
@@ -815,6 +843,7 @@ export const authService = {
         nama: params.teacher.nama.trim().toUpperCase(),
         teacherId: params.teacher.id,
         assignedGroup: params.teacher.kelompokBTQ,
+        assignedTahfidzGroup: params.teacher.kelompokTahfidz,
         isActive: true,
         isDefaultPassword: !(params.password && params.password.trim().length > 0),
         failedAttempts: 0,
@@ -839,6 +868,7 @@ export const authService = {
     nama: string;
     role: Role;
     assignedGroup?: string;
+    assignedTahfidzGroup?: string;
     assignedClass?: string;
   }): Promise<{ ok: true; account: UserAccount } | { ok: false; error: string }> {
     const cleanUsername = params.username.trim().toLowerCase().replace(/[^a-z0-9._-]/g, '');
@@ -869,6 +899,7 @@ export const authService = {
       role: params.role,
       nama: params.nama.trim(),
       assignedGroup: params.assignedGroup,
+      assignedTahfidzGroup: params.assignedTahfidzGroup,
       assignedClass: params.assignedClass,
       isActive: true,
       isDefaultPassword: false,

@@ -1,11 +1,16 @@
-export type Role = 'admin' | 'guru_ngaji' | 'guru_tahfidz' | 'wali_kelas';
+export type Role =
+  | 'admin'
+  | 'guru_ngaji'
+  | 'guru_tahfidz'
+  | 'wali_kelas';
 
 export interface UserSession {
   accountId: string;
   username: string;
   role: Role;
   nama: string;
-  assignedGroup?: string; // For guru_ngaji (e.g., "AL-QUR'AN PI D" or "UMI KULSUM")
+  assignedGroup?: string; // For guru_ngaji (Kelas BTQ, can hold 2+ classes separated by , or &)
+  assignedTahfidzGroup?: string; // For guru_tahfidz (Halaqah / Kelas Tahfidz)
   assignedClass?: string; // For wali_kelas (e.g., "7D" or "7A")
   isDefaultPassword?: boolean;
   loginAt: number;
@@ -20,6 +25,7 @@ export interface UserAccount {
   nama: string;
   teacherId?: string;
   assignedGroup?: string;
+  assignedTahfidzGroup?: string;
   assignedClass?: string;
   isActive: boolean;
   isDefaultPassword: boolean;
@@ -36,7 +42,13 @@ export interface AuthLogEntry {
   username: string;
   nama?: string;
   role?: Role;
-  event: 'LOGIN_SUCCESS' | 'LOGIN_FAILED' | 'ACCOUNT_LOCKED' | 'PASSWORD_CHANGED' | 'PASSWORD_RESET' | 'ACCOUNT_CREATED';
+  event:
+    | 'LOGIN_SUCCESS'
+    | 'LOGIN_FAILED'
+    | 'ACCOUNT_LOCKED'
+    | 'PASSWORD_CHANGED'
+    | 'PASSWORD_RESET'
+    | 'ACCOUNT_CREATED';
   detail: string;
 }
 
@@ -45,6 +57,7 @@ export interface Teacher {
   nama: string;
   role: 'guru_ngaji' | 'guru_tahfidz';
   kelompokBTQ: string;
+  kelompokTahfidz?: string;
   ruangan: string;
   kontak?: string;
 }
@@ -66,10 +79,13 @@ export interface Student {
   gender: 'L' | 'P';
   kelas: string; // e.g. "7D", "7A", "8E", "9G"
   kelasBTQ: string; // e.g. "AL-QUR'AN PI D", "TILAWATI 4 PI", "TILAWATI 3 PA", "QUR'AN PA"
-  pengajar: string; // e.g. "UMI KULSUM", "TAUFIQURRAHMAN S.PD", "USTADZ RIDWAN S.PD.I"
+  pengajar: string; // Guru Ngaji / BTQ
   ruangan: string; // e.g. "RUANGAN 7E", "RUANGAN 7A", "LAB PAI"
   waliKelas: string; // e.g. "USTADZAH NURUL M.PD"
   isTahfidz: boolean;
+  pembimbingTahfidz?: string; // Guru Tahfidz (from separate Tahfidz import format)
+  halaqahTahfidz?: string; // Kelompok/Halaqah Tahfidz
+  ruanganTahfidz?: string; // Ruangan khusus Tahfidz
   targetJuz?: string; // e.g. "Juz 30 & 29"
   totalHafalan?: string; // e.g. "2 Juz (Juz 30 & 29)"
   hafalanTerakhir?: string; // e.g. "QS. Al-Mulk: 1-15"
@@ -87,7 +103,7 @@ export interface BacaanRecord {
   id: string;
   nisn: string;
   tanggal: string;
-  tipe: 'Tilawati Remaja' | 'Al-Qur\'an';
+  tipe: 'Tilawati Remaja' | "Al-Qur'an";
   jilid: string; // e.g. "Jilid 4" or "Juz 15"
   halaman: string; // e.g. "Hal. 18" or "Ayat 1-20"
   nilai: 'A' | 'B' | 'C';
@@ -101,7 +117,7 @@ export interface TahfidzRecord {
   tanggal: string;
   surat: string; // e.g. "QS. Al-Mulk"
   ayat: string; // e.g. "Ayat 1-15"
-  status: 'Ziyadah' | 'Muroja\'ah' | 'Mutqin';
+  status: 'Ziyadah' | "Muroja'ah" | 'Mutqin';
   kelancaran: 'Sangat Lancar (Mumtaz)' | 'Lancar (Jayyid Jiddan)' | 'Cukup (Jayyid)';
   guru: string;
   catatan?: string;
@@ -115,3 +131,40 @@ export interface AbsensiRecord {
   status: 'Hadir' | 'Sakit' | 'Izin' | 'Alpa';
   keterangan?: string;
 }
+
+export interface RaporPrintStatus {
+  nisn: string;
+  printCount: number;
+  lastPrintedAt: string;
+  lastPrintedBy: string;
+  semester: string;
+  tahunAjaran: string;
+}
+
+export interface RaporPrintBatchLog {
+  id: string;
+  printedAt: string;
+  printedBy: string;
+  kelasLabel: string;
+  jenisCetak:
+    | 'Rapor Siswa (Massal)'
+    | 'Rapor Siswa (Satuan)'
+    | 'Rekapitulasi Nilai Kelas'
+    | 'Download Rapor PDF (Massal)'
+    | 'Download Rapor PDF (Satuan)'
+    | 'Download Rekap Nilai (PDF)';
+  totalRapor: number;
+  semester: string;
+  tahunAjaran: string;
+  nisnList: string[];
+}
+
+export interface RaporSettings {
+  tahunAjaran: string;
+  semester: string;
+  tanggalRapor: string;
+  kepalaSekolah: string;
+  nbmKepala: string;
+  koordinator: string;
+}
+

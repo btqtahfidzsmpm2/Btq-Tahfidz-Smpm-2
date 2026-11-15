@@ -1,7 +1,28 @@
 import React, { useState, useMemo } from 'react';
-import { Student, UserSession, Teacher, UserAccount, AuthLogEntry } from '../types';
+import {
+  Student,
+  UserSession,
+  Teacher,
+  UserAccount,
+  AuthLogEntry,
+  BacaanRecord,
+  TahfidzRecord,
+  AbsensiRecord
+} from '../types';
 import { BatchEvaluationTable } from './BatchEvaluationTable';
 import { AccountSecurityPanel } from './AccountSecurityPanel';
+import { ReportCenterPanel } from './ReportCenterPanel';
+import { storage } from '../services/storage';
+import { downloadRaporPdf } from '../services/raporPdf';
+import {
+  getAuthorizedStudents,
+  getAuthorizedNgajiStudents,
+  getAuthorizedTahfidzStudents,
+  canTeachNgaji,
+  canTeachTahfidz,
+  isValidBtqClass,
+  matchesTeacherName
+} from '../utils/access';
 import {
   Users,
   BookOpen,
@@ -19,21 +40,23 @@ import {
   UserCheck,
   UserPlus,
   MapPin,
-  Phone,
   RefreshCw,
   CopyX,
   Table,
-  Layers,
-  Sparkles,
   Shield,
   KeyRound,
-  AlertTriangle
+  AlertTriangle,
+  Printer,
+  FileDown
 } from 'lucide-react';
 
 interface TeacherDashboardProps {
   user: UserSession;
   students: Student[];
   teachers: Teacher[];
+  bacaanList: BacaanRecord[];
+  tahfidzList: TahfidzRecord[];
+  absensiList: AbsensiRecord[];
   accounts: UserAccount[];
   authLogs: AuthLogEntry[];
   onRefreshAccounts: () => void;
@@ -52,6 +75,7 @@ interface TeacherDashboardProps {
   onViewStudentReport: (student: Student) => void;
   onSyncTeachersFromStudents: () => void;
   onDeduplicateStudents: () => void;
+  onClearAllData: () => void;
   onDataUpdated: () => void;
   onNotify: (type: 'success' | 'error' | 'info', title: string, desc?: string) => void;
 }
@@ -60,6 +84,9 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   user,
   students,
   teachers,
+  bacaanList,
+  tahfidzList,
+  absensiList,
   accounts,
   authLogs,
   onRefreshAccounts,
@@ -78,57 +105,72 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   onViewStudentReport,
   onSyncTeachersFromStudents,
   onDeduplicateStudents,
+  onClearAllData,
   onDataUpdated,
   onNotify
 }) => {
-  // Admin sub-menu tab: 'siswa' | 'penilaian' | 'guru' | 'keamanan'
-  const [adminTab, setAdminTab] = useState<'siswa' | 'penilaian' | 'guru' | 'keamanan'>('siswa');
+  // Admin sub-menu tab: 'siswa' | 'penilaian' | 'rapor' | 'guru' | 'keamanan'
+  const [adminTab, setAdminTab] = useState<'siswa' | 'penilaian' | 'rapor' | 'guru' | 'keamanan'>('siswa');
+  const [preselectedPrintNisn, setPreselectedPrintNisn] = useState<string | null>(null);
 
-  // Guru Ngaji tab: 'tabel' (Tabel Penilaian Massal Real-Time) | 'list' (Daftar Siswa & Rapor)
+  // Guru Ngaji tab: 'tabel' | 'list'
   const [guruNgajiTab, setGuruNgajiTab] = useState<'tabel' | 'list'>('tabel');
+  // Guru Tahfidz tab: 'setoran' | 'list'
+  const [guruTahfidzTab, setGuruTahfidzTab] = useState<'setoran' | 'list'>('setoran');
+  const [tahfidzSearch, setTahfidzSearch] = useState<string>('');
 
   // Filters for Students
   const [filterClass, setFilterClass] = useState<string>('');
   const [filterBTQ, setFilterBTQ] = useState<string>('');
+  const [filterProgram, setFilterProgram] = useState<'' | 'btq' | 'tahfidz' | 'non_tahfidz'>('');
   const [filterGender, setFilterGender] = useState<string>('');
   const [searchTerm, setSearchTerm] = useState<string>('');
 
   // Filters for Teachers
   const [teacherSearch, setTeacherSearch] = useState<string>('');
-  const [teacherRoleFilter, setTeacherRoleFilter] = useState<'all' | 'guru_ngaji' | 'guru_tahfidz'>('all');
+  const [teacherRoleFilter, setTeacherRoleFilter] = useState<
+    'all' | 'guru_ngaji' | 'guru_tahfidz'
+  >('all');
 
   // Role-Based Filtering for Students
-  const authorizedStudents = useMemo(() => {
-    if (user.role === 'admin') {
-      return students;
-    }
-    if (user.role === 'guru_ngaji') {
-      return students.filter(
-        s =>
-          s.pengajar.toLowerCase().includes(user.nama.toLowerCase()) ||
-          (user.assignedGroup && s.kelasBTQ.toLowerCase().includes(user.assignedGroup.toLowerCase()))
-      );
-    }
-    if (user.role === 'guru_tahfidz') {
-      return students.filter(s => s.isTahfidz);
-    }
-    if (user.role === 'wali_kelas') {
-      const targetClass = user.assignedClass || '7D';
-      return students.filter(s => s.kelas.toLowerCase() === targetClass.toLowerCase());
-    }
-    return students;
-  }, [user, students]);
+  const authorizedStudents = useMemo(
+    () => getAuthorizedStudents(user, students),
+    [user, students]
+  );
 
-  // Dynamic list of unique BTQ classes from student dataset
+  const ngajiStudents = useMemo(
+    () => getAuthorizedNgajiStudents(user, students),
+    [user, students]
+  );
+
+  const tahfidzStudents = useMemo(
+    () => getAuthorizedTahfidzStudents(user, students),
+    [user, students]
+  );
+
+  const filteredTahfidzStudents = useMemo(() => {
+    const q = tahfidzSearch.trim().toLowerCase();
+    if (!q) return tahfidzStudents;
+    return tahfidzStudents.filter(
+      s =>
+        s.nama.toLowerCase().includes(q) ||
+        s.nisn.includes(q) ||
+        s.kelas.toLowerCase().includes(q) ||
+        (s.halaqahTahfidz || '').toLowerCase().includes(q)
+    );
+  }, [tahfidzStudents, tahfidzSearch]);
+
+  // Dynamic list of unique BTQ classes (excluding Tahfidz placeholders)
   const availableKelasBTQ = useMemo(() => {
+    const source = user.role === 'admin' ? students : authorizedStudents;
     const set = new Set<string>();
-    students.forEach(s => {
-      if (s.kelasBTQ && s.kelasBTQ.trim() && s.kelasBTQ !== '-') {
+    source.forEach(s => {
+      if (isValidBtqClass(s.kelasBTQ)) {
         set.add(s.kelasBTQ.trim());
       }
     });
     return Array.from(set).sort();
-  }, [students]);
+  }, [user.role, students, authorizedStudents]);
 
   // Combined search and sub-filters for Students
   const filteredStudents = useMemo(() => {
@@ -137,17 +179,27 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
         s.nama.toLowerCase().includes(searchTerm.toLowerCase()) ||
         s.nisn.includes(searchTerm) ||
         s.kelasBTQ.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        s.pengajar.toLowerCase().includes(searchTerm.toLowerCase());
+        s.pengajar.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (s.halaqahTahfidz || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (s.pembimbingTahfidz || '').toLowerCase().includes(searchTerm.toLowerCase());
 
       const matchClass = filterClass ? s.kelas === filterClass : true;
       const matchBTQ = filterBTQ
         ? s.kelasBTQ.trim().toUpperCase() === filterBTQ.trim().toUpperCase()
         : true;
+      const matchProgram =
+        filterProgram === 'btq'
+          ? isValidBtqClass(s.kelasBTQ)
+          : filterProgram === 'tahfidz'
+          ? s.isTahfidz
+          : filterProgram === 'non_tahfidz'
+          ? !s.isTahfidz
+          : true;
       const matchGender = filterGender ? s.gender === filterGender : true;
 
-      return matchSearch && matchClass && matchBTQ && matchGender;
+      return matchSearch && matchClass && matchBTQ && matchProgram && matchGender;
     });
-  }, [authorizedStudents, searchTerm, filterClass, filterBTQ, filterGender]);
+  }, [authorizedStudents, searchTerm, filterClass, filterBTQ, filterProgram, filterGender]);
 
   // Filtered Teachers
   const filteredTeachers = useMemo(() => {
@@ -155,6 +207,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
       const matchSearch =
         t.nama.toLowerCase().includes(teacherSearch.toLowerCase()) ||
         t.kelompokBTQ.toLowerCase().includes(teacherSearch.toLowerCase()) ||
+        (t.kelompokTahfidz || '').toLowerCase().includes(teacherSearch.toLowerCase()) ||
         t.ruangan.toLowerCase().includes(teacherSearch.toLowerCase());
 
       const matchRole =
@@ -183,7 +236,9 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
     const total = teachers.length;
     const guruNgaji = teachers.filter(t => t.role === 'guru_ngaji').length;
     const guruTahfidz = teachers.filter(t => t.role === 'guru_tahfidz').length;
-    const uniqueRooms = new Set(teachers.map(t => t.ruangan)).size;
+    const uniqueRooms = new Set(
+      teachers.map(t => t.ruangan).filter(r => r && r.trim() && r !== '-')
+    ).size;
 
     return { total, guruNgaji, guruTahfidz, uniqueRooms };
   }, [teachers]);
@@ -217,14 +272,43 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
     onNotify('success', 'Export CSV Berhasil', `Berhasil mengekspor ${filteredStudents.length} data siswa.`);
   };
 
+  const handleQuickDownloadStudentPdf = async (student: Student) => {
+    try {
+      const settings = storage.getRaporSettings();
+      const fileName = await downloadRaporPdf({
+        students: [student],
+        bacaanList,
+        tahfidzList,
+        absensiList,
+        settings,
+        fileLabel: `Kelas_${student.kelas}_${student.nama}`
+      });
+      storage.recordRaporPrintBatch({
+        students: [student],
+        printedBy: user.nama,
+        kelasLabel: `Kelas ${student.kelas}`,
+        jenisCetak: 'Download Rapor PDF (Satuan)',
+        semester: settings.semester,
+        tahunAjaran: settings.tahunAjaran
+      });
+      onNotify(
+        'success',
+        'Download Rapor PDF Berhasil',
+        `Rapor ${student.nama} (${fileName}) berhasil diunduh.`
+      );
+    } catch {
+      onNotify('error', 'Gagal Download PDF', 'Terjadi kendala saat membuat file PDF rapor.');
+    }
+  };
+
   const getRoleDescription = () => {
     switch (user.role) {
       case 'admin':
-        return 'Administrator Utama: Akses penuh untuk mengelola, menambah, dan menghapus siswa serta guru ngaji/tahfidz secara real time.';
+        return 'Administrator Utama: Akses penuh untuk mengelola siswa Kelas BTQ & Program Tahfidz, Guru Ngaji, Guru Tahfidz, serta Cetak/Download Rapor.';
       case 'guru_ngaji':
-        return `Guru Ngaji: Membina dan mencatat mutaba'ah siswa pada kelompok ${user.assignedGroup || 'BTQ binaan Anda'}.`;
+        return `Guru Ngaji (Kelas BTQ): Membina capaian Tilawati & Al-Qur'an siswa pada kelompok ${user.assignedGroup || 'BTQ binaan Anda'}.`;
       case 'guru_tahfidz':
-        return 'Guru Tahfidz: Mengelola setoran hafalan Qur\'an, tasmi juz, dan mutaba\'ah santri tahfidz.';
+        return `Guru Tahfidz (Program Tahfidz): Mengelola setoran hafalan Qur'an, tasmi juz, dan capaian santri pada halaqah ${user.assignedTahfidzGroup || user.assignedGroup || 'Tahfidz binaan Anda'}.`;
       case 'wali_kelas':
         return `Wali Kelas ${user.assignedClass || 'Formal'}: Memantau rekap harian kehadiran dan pencapaian siswa perwalian Anda.`;
       default:
@@ -234,6 +318,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
 
   return (
     <div className="space-y-6">
+      <div className="no-print space-y-6">
 
       {/* Default Password Security Alert Banner */}
       {user.isDefaultPassword && (
@@ -272,7 +357,14 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
           <div>
             <div className="flex flex-wrap items-center gap-2">
               <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">
-                Dashboard {user.role === 'admin' ? 'Administrator' : user.role === 'guru_ngaji' ? 'Guru Ngaji' : user.role === 'guru_tahfidz' ? 'Guru Tahfidz' : 'Wali Kelas'}
+                Dashboard{' '}
+                {user.role === 'admin'
+                  ? 'Administrator'
+                  : user.role === 'guru_ngaji'
+                  ? 'Guru Ngaji'
+                  : user.role === 'guru_tahfidz'
+                  ? 'Guru Tahfidz'
+                  : 'Wali Kelas'}
               </h1>
               <span className="text-xs text-emerald-800 font-semibold bg-emerald-50 px-2.5 py-0.5 rounded-md border border-emerald-200 uppercase font-mono">
                 {user.nama}
@@ -311,10 +403,18 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                 <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-800" />
                 <span>Import Format Data</span>
               </button>
+
+              <button
+                onClick={() => setAdminTab('rapor')}
+                className="px-3.5 py-2 text-xs font-bold text-white bg-slate-900 hover:bg-slate-800 rounded-xl transition-colors shadow-2xs flex items-center gap-1.5"
+              >
+                <FileDown className="w-3.5 h-3.5 text-amber-300" />
+                <span>Download & Cetak Rapor</span>
+              </button>
             </>
           )}
 
-          {(user.role === 'admin' || user.role === 'guru_ngaji') && (
+          {canTeachNgaji(user.role) && (
             <button
               onClick={() => onOpenBacaanModal()}
               className="px-3.5 py-2 text-xs font-bold text-white bg-emerald-800 hover:bg-emerald-900 rounded-xl transition-colors shadow-2xs flex items-center gap-1.5"
@@ -324,7 +424,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
             </button>
           )}
 
-          {(user.role === 'admin' || user.role === 'guru_tahfidz') && (
+          {canTeachTahfidz(user.role) && (
             <button
               onClick={() => onOpenTahfidzModal()}
               className="px-3.5 py-2 text-xs font-bold text-slate-900 bg-amber-400 hover:bg-amber-300 rounded-xl transition-colors shadow-2xs flex items-center gap-1.5"
@@ -352,9 +452,9 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
         </div>
       </section>
 
-      {/* GURU NGAJI SUB-MENU TABS */}
+      {/* GURU NGAJI SUB-MENU TABS (KHUSUS TILAWATI & AL-QUR'AN / BTQ) */}
       {user.role === 'guru_ngaji' && (
-        <div className="flex items-center gap-2 border-b border-slate-200 pb-2">
+        <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 pb-2">
           <button
             onClick={() => setGuruNgajiTab('tabel')}
             className={`px-4 py-2 text-xs font-bold rounded-xl transition-colors flex items-center gap-2 ${
@@ -364,7 +464,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
             }`}
           >
             <Table className="w-4 h-4" />
-            <span>Tabel Penilaian Massal (Real-Time)</span>
+            <span>Tabel Penilaian Massal BTQ ({ngajiStudents.length})</span>
             <span className="text-[10px] bg-emerald-700 text-white px-1.5 py-0.5 rounded font-mono font-semibold">
               ⚡ Mode Cepat
             </span>
@@ -379,7 +479,36 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
             }`}
           >
             <Users className="w-4 h-4" />
-            <span>Daftar Siswa & Detail Rapor ({authorizedStudents.length})</span>
+            <span>Daftar Siswa Kelas BTQ & Rapor ({ngajiStudents.length})</span>
+          </button>
+        </div>
+      )}
+
+      {/* GURU TAHFIDZ SUB-MENU TABS (KHUSUS SETORAN & HALAQAH TAHFIDZ) */}
+      {user.role === 'guru_tahfidz' && (
+        <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 pb-2">
+          <button
+            onClick={() => setGuruTahfidzTab('setoran')}
+            className={`px-4 py-2 text-xs font-bold rounded-xl transition-colors flex items-center gap-2 ${
+              guruTahfidzTab === 'setoran'
+                ? 'bg-amber-500 text-slate-950 shadow-2xs'
+                : 'bg-white text-slate-600 hover:bg-slate-50 border border-slate-200'
+            }`}
+          >
+            <Award className="w-4 h-4" />
+            <span>Halaqah & Setoran Tahfidz ({tahfidzStudents.length})</span>
+          </button>
+
+          <button
+            onClick={() => setGuruTahfidzTab('list')}
+            className={`px-4 py-2 text-xs font-bold rounded-xl transition-colors flex items-center gap-2 ${
+              guruTahfidzTab === 'list'
+                ? 'bg-emerald-800 text-white shadow-2xs'
+                : 'bg-white text-slate-600 hover:bg-slate-50 border border-slate-200'
+            }`}
+          >
+            <Users className="w-4 h-4" />
+            <span>Ringkasan & Rapor Santri Tahfidz ({tahfidzStudents.length})</span>
           </button>
         </div>
       )}
@@ -416,6 +545,18 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
             </button>
 
             <button
+              onClick={() => setAdminTab('rapor')}
+              className={`px-4 py-2 text-xs font-bold rounded-xl transition-colors flex items-center gap-2 ${
+                adminTab === 'rapor'
+                  ? 'bg-emerald-800 text-white shadow-2xs'
+                  : 'bg-white text-slate-600 hover:bg-slate-50 border border-slate-200'
+              }`}
+            >
+              <FileDown className="w-4 h-4" />
+              <span>Download, Cetak & Rekap Rapor</span>
+            </button>
+
+            <button
               onClick={() => setAdminTab('guru')}
               className={`px-4 py-2 text-xs font-bold rounded-xl transition-colors flex items-center gap-2 ${
                 adminTab === 'guru'
@@ -440,14 +581,29 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
             </button>
           </div>
 
-          <button
-            onClick={onDeduplicateStudents}
-            className="px-3.5 py-2 text-xs font-bold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-xl transition-colors shadow-2xs flex items-center gap-1.5 cursor-pointer"
-            title="Hapus data siswa yang namanya dobel menjadi satu nama saja"
-          >
-            <CopyX className="w-3.5 h-3.5 text-rose-600" />
-            <span>Hapus Nama Siswa Dobel</span>
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            {(students.length > 0 || teachers.length > 0) && (
+              <>
+                <button
+                  onClick={onDeduplicateStudents}
+                  className="px-3.5 py-2 text-xs font-bold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-xl transition-colors shadow-2xs flex items-center gap-1.5 cursor-pointer"
+                  title="Hapus data siswa yang namanya dobel menjadi satu nama saja"
+                >
+                  <CopyX className="w-3.5 h-3.5 text-rose-600" />
+                  <span>Hapus Nama Siswa Dobel</span>
+                </button>
+
+                <button
+                  onClick={onClearAllData}
+                  className="px-3.5 py-2 text-xs font-bold text-rose-800 bg-white hover:bg-rose-50 border border-rose-300 rounded-xl transition-colors shadow-2xs flex items-center gap-1.5 cursor-pointer"
+                  title="Hapus seluruh data siswa, guru, bacaan, dan absensi"
+                >
+                  <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+                  <span>Kosongkan Semua Data</span>
+                </button>
+              </>
+            )}
+          </div>
         </div>
       )}
 
@@ -462,21 +618,141 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
         />
       )}
 
-      {/* VIEW 1: TABEL PENILAIAN MASSAL (GURU NGAJI / ADMIN) */}
+      {/* VIEW 1: TABEL PENILAIAN MASSAL BTQ (GURU NGAJI / ADMIN) */}
       {((user.role === 'guru_ngaji' && guruNgajiTab === 'tabel') ||
         (user.role === 'admin' && adminTab === 'penilaian')) && (
         <BatchEvaluationTable
           user={user}
-          students={authorizedStudents}
+          students={ngajiStudents}
+          bacaanList={bacaanList}
+          absensiList={absensiList}
           onNotify={onNotify}
           onDataUpdated={onDataUpdated}
         />
       )}
 
+      {/* VIEW 1B: HALAQAH & SETORAN TAHFIDZ (KHUSUS GURU TAHFIDZ) */}
+      {user.role === 'guru_tahfidz' && guruTahfidzTab === 'setoran' && (
+        <section className="bg-white rounded-2xl shadow-xs border border-slate-200 overflow-hidden">
+          <div className="p-4 border-b border-slate-200 bg-amber-50/70 flex flex-col md:flex-row md:items-center justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-extrabold text-slate-900 flex items-center gap-2">
+                <Award className="w-4 h-4 text-amber-600" />
+                <span>Daftar Santri Halaqah Program Tahfidz</span>
+              </h3>
+              <p className="text-xs text-slate-600 mt-0.5">
+                Khusus santri peserta Program Tahfidz pada halaqah <strong>{user.assignedTahfidzGroup || user.assignedGroup || 'Binaan Anda'}</strong> (terpisah dari kelas reguler BTQ).
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="relative">
+                <Search className="w-3.5 h-3.5 absolute left-3 top-2.5 text-slate-400" />
+                <input
+                  type="text"
+                  value={tahfidzSearch}
+                  onChange={e => setTahfidzSearch(e.target.value)}
+                  placeholder="Cari santri / NISN / halaqah..."
+                  className="pl-8 pr-3 py-1.5 border border-amber-200 rounded-lg text-xs bg-white focus:outline-none focus:ring-1 focus:ring-amber-500"
+                />
+              </div>
+              <button
+                onClick={() => onOpenTahfidzModal()}
+                className="px-3.5 py-2 bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold rounded-xl text-xs transition-colors flex items-center gap-1.5 shrink-0 shadow-2xs"
+              >
+                <Award className="w-3.5 h-3.5" />
+                <span>+ Catat Setoran Tahfidz</span>
+              </button>
+            </div>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs text-left">
+              <thead className="bg-slate-100 text-slate-600 uppercase font-bold border-b border-slate-200">
+                <tr>
+                  <th className="p-3">NISN</th>
+                  <th className="p-3">Nama Santri</th>
+                  <th className="p-3">Kelas Formal</th>
+                  <th className="p-3">Halaqah Tahfidz & Ruangan</th>
+                  <th className="p-3">Target Juz</th>
+                  <th className="p-3">Total Hafalan</th>
+                  <th className="p-3">Setoran Terakhir</th>
+                  <th className="p-3 text-center">Nilai Tes</th>
+                  <th className="p-3 text-center">Aksi</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {filteredTahfidzStudents.length > 0 ? (
+                  filteredTahfidzStudents.map(st => (
+                    <tr key={st.id} className="hover:bg-amber-50/30 transition-colors">
+                      <td className="p-3 font-mono text-slate-500 whitespace-nowrap">{st.nisn}</td>
+                      <td className="p-3 font-bold text-slate-900">
+                        <div>{st.nama}</div>
+                        <span className="text-[10px] font-normal text-slate-500">
+                          {isValidBtqClass(st.kelasBTQ) ? `Kelas BTQ: ${st.kelasBTQ}` : 'Program Tahfidz (Non-BTQ)'}
+                        </span>
+                      </td>
+                      <td className="p-3 font-semibold text-slate-700 whitespace-nowrap">{st.kelas}</td>
+                      <td className="p-3">
+                        <div className="font-semibold text-amber-800">
+                          {st.halaqahTahfidz || user.assignedTahfidzGroup || 'HALAQAH TAHFIDZ'}
+                        </div>
+                        <span className="text-[10px] font-mono text-slate-400">
+                          {st.ruanganTahfidz || st.ruangan}
+                        </span>
+                      </td>
+                      <td className="p-3 font-semibold text-slate-800">{st.targetJuz || 'Juz 30'}</td>
+                      <td className="p-3 font-bold text-emerald-800">{st.totalHafalan || '-'}</td>
+                      <td className="p-3 text-slate-700">{st.hafalanTerakhir || '-'}</td>
+                      <td className="p-3 text-center">
+                        <span className="font-bold font-mono text-slate-800">{st.ujian.nilai}</span>
+                        <span className="block text-[10px] text-slate-400 font-semibold">
+                          {st.ujian.predikat}
+                        </span>
+                      </td>
+                      <td className="p-3 text-center">
+                        <div className="flex items-center justify-center gap-1.5">
+                          <button
+                            onClick={() => onOpenTahfidzModal(st)}
+                            className="px-2.5 py-1 bg-amber-100 hover:bg-amber-200 text-amber-900 font-bold rounded-lg text-[11px] transition-colors"
+                          >
+                            + Setoran
+                          </button>
+                          <button
+                            onClick={() => onOpenUjianModal(st)}
+                            className="p-1.5 text-purple-700 hover:text-purple-900 hover:bg-purple-50 rounded-lg transition-colors"
+                            title="Update Nilai Tes Tahfidz"
+                          >
+                            <Edit3 className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() => onViewStudentReport(st)}
+                            className="p-1.5 text-slate-600 hover:text-emerald-700 hover:bg-emerald-50 rounded-lg transition-colors"
+                            title="Lihat Rapor"
+                          >
+                            <Eye className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))
+                ) : (
+                  <tr>
+                    <td colSpan={9} className="p-8 text-center text-slate-400">
+                      Belum ada santri Program Tahfidz yang terhubung dengan akun Anda. Pastikan Admin mengimpor data Format Tahfidz atau menandai siswa sebagai peserta Tahfidz.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+
       {/* VIEW 2: KELOLA SISWA (Directory / Metrics) */}
       {(((user.role === 'admin' && adminTab === 'siswa') ||
         (user.role === 'guru_ngaji' && guruNgajiTab === 'list') ||
-        (user.role !== 'admin' && user.role !== 'guru_ngaji'))) && (
+        (user.role === 'guru_tahfidz' && guruTahfidzTab === 'list') ||
+        user.role === 'wali_kelas')) && (
         <>
           {/* 4 Metric Cards */}
           <section className="grid grid-cols-2 lg:grid-cols-4 gap-4">
@@ -588,6 +864,20 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                   ))}
                 </select>
 
+                {/* Filter Program (BTQ vs Tahfidz) */}
+                {user.role !== 'guru_tahfidz' && (
+                  <select
+                    value={filterProgram}
+                    onChange={e => setFilterProgram(e.target.value as '' | 'btq' | 'tahfidz' | 'non_tahfidz')}
+                    className="px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs bg-white text-slate-700 font-medium focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                  >
+                    <option value="">Semua Program</option>
+                    <option value="btq">Peserta Kelas BTQ</option>
+                    <option value="tahfidz">Peserta Program Tahfidz</option>
+                    <option value="non_tahfidz">BTQ Saja (Non-Tahfidz)</option>
+                  </select>
+                )}
+
                 {/* Filter Gender */}
                 <select
                   value={filterGender}
@@ -599,11 +889,12 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                   <option value="L">Santri Putra</option>
                 </select>
 
-                {(filterClass || filterBTQ || filterGender || searchTerm) && (
+                {(filterClass || filterBTQ || filterProgram || filterGender || searchTerm) && (
                   <button
                     onClick={() => {
                       setFilterClass('');
                       setFilterBTQ('');
+                      setFilterProgram('');
                       setFilterGender('');
                       setSearchTerm('');
                     }}
@@ -647,8 +938,8 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                     <th className="p-3 whitespace-nowrap">NISN</th>
                     <th className="p-3">Nama Siswa</th>
                     <th className="p-3 whitespace-nowrap">Kelas</th>
-                    <th className="p-3">Kelompok BTQ</th>
-                    <th className="p-3">Pengajar & Ruangan</th>
+                    <th className="p-3">Kelas BTQ &amp; Tahfidz</th>
+                    <th className="p-3">Pengajar &amp; Ruangan</th>
                     <th className="p-3 whitespace-nowrap">Capaian Terakhir</th>
                     <th className="p-3 text-center whitespace-nowrap">Nilai Ujian</th>
                     <th className="p-3 text-center whitespace-nowrap">Hasil Tes</th>
@@ -667,8 +958,8 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                           <div className="flex items-center gap-1.5">
                             <span>{student.nama}</span>
                             {student.isTahfidz && (
-                              <span className="text-[10px] text-amber-700 font-bold" title="Peserta Tahfidz">
-                                ★
+                              <span className="text-[10px] text-amber-700 font-bold" title="Peserta Program Tahfidz">
+                                ★ Tahfidz
                               </span>
                             )}
                           </div>
@@ -681,15 +972,39 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                           {student.kelas}
                         </td>
 
-                        <td className="p-3 font-semibold text-emerald-800">
-                          {student.kelasBTQ}
+                        <td className="p-3">
+                          <div className={`font-semibold ${isValidBtqClass(student.kelasBTQ) ? 'text-emerald-800' : 'text-slate-400 italic font-normal'}`}>
+                            {isValidBtqClass(student.kelasBTQ) ? `BTQ: ${student.kelasBTQ}` : 'Tidak ikut Kelas BTQ'}
+                          </div>
+                          {student.isTahfidz ? (
+                            <span className="text-[10px] font-semibold text-amber-700 block mt-0.5">
+                              Tahfidz: {student.halaqahTahfidz || 'HALAQAH TAHFIDZ'}
+                            </span>
+                          ) : (
+                            <span className="text-[10px] text-slate-400 block mt-0.5">
+                              Non-Tahfidz
+                            </span>
+                          )}
                         </td>
 
                         <td className="p-3 text-slate-600">
-                          <div className="font-medium text-slate-800">{student.pengajar}</div>
-                          <span className="text-[10px] text-slate-400 font-mono block">
-                            {student.ruangan}
-                          </span>
+                          {isValidBtqClass(student.kelasBTQ) && (
+                            <div>
+                              <span className="font-medium text-slate-800">Ngaji: {student.pengajar}</span>
+                              <span className="text-[10px] text-slate-400 font-mono ml-1">({student.ruangan})</span>
+                            </div>
+                          )}
+                          {student.isTahfidz && student.pembimbingTahfidz && student.pembimbingTahfidz !== '-' && (
+                            <div className="mt-0.5">
+                              <span className="font-medium text-amber-800">Tahfidz: {student.pembimbingTahfidz}</span>
+                              {student.ruanganTahfidz && (
+                                <span className="text-[10px] text-slate-400 font-mono ml-1">({student.ruanganTahfidz})</span>
+                              )}
+                            </div>
+                          )}
+                          {!isValidBtqClass(student.kelasBTQ) && (!student.isTahfidz || !student.pembimbingTahfidz) && (
+                            <span className="text-slate-400">-</span>
+                          )}
                         </td>
 
                         <td className="p-3 text-slate-700">
@@ -731,17 +1046,19 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                               <Eye className="w-3.5 h-3.5" />
                             </button>
 
-                            {/* Input Reading (Tilawati) */}
-                            <button
-                              onClick={() => onOpenBacaanModal(student)}
-                              className="p-1.5 text-emerald-700 hover:text-emerald-900 hover:bg-emerald-50 rounded-lg transition-colors"
-                              title="Catat Capaian Tilawati / Qur'an"
-                            >
-                              <BookOpen className="w-3.5 h-3.5" />
-                            </button>
+                            {/* Input Reading (Tilawati) - KHUSUS ADMIN & GURU NGAJI */}
+                            {canTeachNgaji(user.role) && (
+                              <button
+                                onClick={() => onOpenBacaanModal(student)}
+                                className="p-1.5 text-emerald-700 hover:text-emerald-900 hover:bg-emerald-50 rounded-lg transition-colors"
+                                title="Catat Capaian Tilawati / Qur'an"
+                              >
+                                <BookOpen className="w-3.5 h-3.5" />
+                              </button>
+                            )}
 
-                            {/* Input Tahfidz */}
-                            {student.isTahfidz && (
+                            {/* Input Tahfidz - KHUSUS ADMIN & GURU TAHFIDZ */}
+                            {student.isTahfidz && canTeachTahfidz(user.role) && (
                               <button
                                 onClick={() => onOpenTahfidzModal(student)}
                                 className="p-1.5 text-amber-600 hover:text-amber-800 hover:bg-amber-50 rounded-lg transition-colors"
@@ -760,9 +1077,28 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                               <Edit3 className="w-3.5 h-3.5" />
                             </button>
 
-                            {/* ADMIN ONLY: EDIT & DELETE SISWA REAL TIME */}
+                            {/* ADMIN ONLY: DOWNLOAD PDF, CETAK RAPOR, EDIT & DELETE SISWA REAL TIME */}
                             {user.role === 'admin' && (
                               <>
+                                <button
+                                  onClick={() => handleQuickDownloadStudentPdf(student)}
+                                  className="p-1.5 text-indigo-700 hover:text-indigo-900 hover:bg-indigo-50 rounded-lg transition-colors"
+                                  title="Download Rapor PDF Siswa Ini"
+                                >
+                                  <FileDown className="w-3.5 h-3.5" />
+                                </button>
+
+                                <button
+                                  onClick={() => {
+                                    setPreselectedPrintNisn(student.nisn);
+                                    setAdminTab('rapor');
+                                  }}
+                                  className="p-1.5 text-slate-700 hover:text-slate-950 hover:bg-slate-100 rounded-lg transition-colors"
+                                  title="Cetak Rapor Siswa Ini"
+                                >
+                                  <Printer className="w-3.5 h-3.5" />
+                                </button>
+
                                 <button
                                   onClick={() => onOpenEditStudentModal(student)}
                                   className="p-1.5 text-blue-600 hover:text-blue-800 hover:bg-blue-50 rounded-lg transition-colors"
@@ -787,8 +1123,29 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                     ))
                   ) : (
                     <tr>
-                      <td colSpan={9} className="p-8 text-center text-slate-400">
-                        Tidak ada data siswa yang cocok dengan kriteria filter atau hak akses Anda.
+                      <td colSpan={9} className="p-10 text-center text-slate-500">
+                        {students.length === 0 && user.role === 'admin' ? (
+                          <div className="max-w-md mx-auto space-y-3">
+                            <div className="w-11 h-11 rounded-2xl bg-emerald-50 text-emerald-700 flex items-center justify-center mx-auto border border-emerald-200">
+                              <FileSpreadsheet className="w-5 h-5" />
+                            </div>
+                            <p className="text-sm font-bold text-slate-800">
+                              Database Siswa & Pengajar Masih Kosong
+                            </p>
+                            <p className="text-xs text-slate-500 leading-relaxed">
+                              Seluruh data contoh telah dibersihkan. Silakan unggah data siswa, NISN, kelompok BTQ, dan guru pengajar melalui tombol <strong>Import Format Data</strong>.
+                            </p>
+                            <button
+                              onClick={onOpenImportModal}
+                              className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-800 hover:bg-emerald-900 text-white font-bold text-xs rounded-xl transition-colors shadow-2xs"
+                            >
+                              <FileSpreadsheet className="w-4 h-4" />
+                              <span>Import Format Data Sekarang</span>
+                            </button>
+                          </div>
+                        ) : (
+                          'Tidak ada data siswa yang cocok dengan kriteria filter atau hak akses Anda.'
+                        )}
                       </td>
                     </tr>
                   )}
@@ -826,7 +1183,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                   Sinkronisasi Guru Pengajar Langsung dari Data Siswa Terimpor
                 </h3>
                 <p className="text-[11px] text-emerald-800 leading-relaxed mt-0.5 max-w-2xl">
-                  Daftar guru ngaji & tahfidz dimuat dari kolom <strong>PENGAJAR_BTQ</strong>, <strong>KELOMPOK_BTQ</strong>, dan <strong>RUANGAN</strong> pada data siswa yang telah Anda unggah. Klik tombol di kanan untuk membersihkan guru contoh dan memuat guru dari data siswa.
+                  Daftar guru dimuat terpisah sesuai tugasnya: kolom <strong>PENGAJAR_BTQ</strong> (Format Ngaji) menjadi <strong>Guru Ngaji (Kelas BTQ)</strong> dan kolom <strong>PEMBIMBING_TAHFIDZ</strong> (Format Tahfidz) menjadi <strong>Guru Tahfidz (Program Tahfidz)</strong>.
                 </p>
               </div>
             </div>
@@ -858,7 +1215,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
 
             <div className="p-4 rounded-xl bg-white border border-slate-200">
               <div className="flex items-center justify-between text-slate-500 mb-1">
-                <span className="text-xs font-medium">Guru Ngaji / BTQ</span>
+                <span className="text-xs font-medium">Guru Ngaji (Kelas BTQ)</span>
                 <BookOpen className="w-4 h-4 text-emerald-800" />
               </div>
               <span className="text-2xl font-black text-emerald-800 font-mono tabular-nums">
@@ -871,14 +1228,14 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
 
             <div className="p-4 rounded-xl bg-white border border-slate-200">
               <div className="flex items-center justify-between text-slate-500 mb-1">
-                <span className="text-xs font-medium">Guru Tahfidz</span>
+                <span className="text-xs font-medium">Guru Tahfidz (Program Tahfidz)</span>
                 <Award className="w-4 h-4 text-amber-600" />
               </div>
               <span className="text-2xl font-black text-amber-700 font-mono tabular-nums">
                 {teacherMetrics.guruTahfidz}
               </span>
               <span className="text-[11px] text-slate-400 block mt-0.5">
-                Khusus santri halaqah tahfidz
+                Membimbing Halaqah & Setoran Tahfidz
               </span>
             </div>
 
@@ -901,9 +1258,9 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
             
             {/* Filter Bar */}
             <div className="p-4 border-b border-slate-200 bg-slate-50/60 flex flex-col md:flex-row justify-between items-stretch md:items-center gap-3">
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <span className="text-xs font-bold text-slate-700">Filter Peran:</span>
-                <div className="flex items-center gap-1 p-0.5 bg-slate-200/70 rounded-lg">
+                <div className="flex flex-wrap items-center gap-1 p-0.5 bg-slate-200/70 rounded-lg">
                   <button
                     onClick={() => setTeacherRoleFilter('all')}
                     className={`px-3 py-1 text-xs font-bold rounded-md transition-colors ${
@@ -928,7 +1285,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                     onClick={() => setTeacherRoleFilter('guru_tahfidz')}
                     className={`px-3 py-1 text-xs font-bold rounded-md transition-colors ${
                       teacherRoleFilter === 'guru_tahfidz'
-                        ? 'bg-white text-slate-900 shadow-2xs'
+                        ? 'bg-white text-amber-800 shadow-2xs'
                         : 'text-slate-600 hover:text-slate-900'
                     }`}
                   >
@@ -975,7 +1332,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                   <tr>
                     <th className="p-3">Nama Ustadz / Ustadzah</th>
                     <th className="p-3">Bidang / Peran</th>
-                    <th className="p-3">Kelompok Halaqah / BTQ</th>
+                    <th className="p-3">Kelas BTQ / Halaqah Tahfidz</th>
                     <th className="p-3">Ruangan</th>
                     <th className="p-3">Kontak WhatsApp</th>
                     <th className="p-3 text-center">Santri Dibimbing</th>
@@ -985,13 +1342,15 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                 <tbody className="divide-y divide-slate-100">
                   {filteredTeachers.length > 0 ? (
                     filteredTeachers.map(teacher => {
-                      const studentCount = students.filter(
-                        s => s.pengajar.toLowerCase().includes(teacher.nama.toLowerCase())
+                      const studentCount = students.filter(s =>
+                        teacher.role === 'guru_tahfidz'
+                          ? s.isTahfidz && matchesTeacherName(s.pembimbingTahfidz, teacher.nama)
+                          : isValidBtqClass(s.kelasBTQ) && matchesTeacherName(s.pengajar, teacher.nama)
                       ).length;
                       const linkedAcc = accounts.find(
                         a =>
                           a.teacherId === teacher.id ||
-                          ((a.role === 'guru_ngaji' || a.role === 'guru_tahfidz') &&
+                          (a.role === teacher.role &&
                             a.nama.trim().toUpperCase() === teacher.nama.trim().toUpperCase())
                       );
 
@@ -1010,16 +1369,26 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                             <span
                               className={`font-semibold text-xs ${
                                 teacher.role === 'guru_tahfidz'
-                                  ? 'text-amber-800'
+                                  ? 'text-amber-700'
                                   : 'text-emerald-800'
                               }`}
                             >
-                              {teacher.role === 'guru_tahfidz' ? 'Guru Tahfidz' : 'Guru Ngaji (BTQ)'}
+                              {teacher.role === 'guru_tahfidz'
+                                ? 'Guru Tahfidz (Program Tahfidz)'
+                                : 'Guru Ngaji (Kelas BTQ)'}
                             </span>
                           </td>
 
                           <td className="p-3 font-medium text-slate-700">
-                            {teacher.kelompokBTQ}
+                            {teacher.role === 'guru_tahfidz' ? (
+                              <span className="text-amber-800 font-semibold">
+                                {teacher.kelompokTahfidz || teacher.kelompokBTQ}
+                              </span>
+                            ) : (
+                              <span className="text-emerald-900 font-semibold">
+                                {teacher.kelompokBTQ}
+                              </span>
+                            )}
                           </td>
 
                           <td className="p-3 font-mono text-slate-600">
@@ -1094,6 +1463,21 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
           </section>
 
         </div>
+      )}
+      </div>
+
+      {/* VIEW RAPOR: CETAK MASSAL & REKAP CETAK RAPOR (HANYA ADMIN) */}
+      {user.role === 'admin' && adminTab === 'rapor' && (
+        <ReportCenterPanel
+          user={user}
+          students={students}
+          bacaanList={bacaanList}
+          tahfidzList={tahfidzList}
+          absensiList={absensiList}
+          preselectedStudentNisn={preselectedPrintNisn}
+          onClearPreselected={() => setPreselectedPrintNisn(null)}
+          onNotify={onNotify}
+        />
       )}
 
     </div>
