@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Student, UserSession, BacaanRecord, AbsensiRecord } from '../types';
 import { storage } from '../services/storage';
-import { isValidBtqClass } from '../utils/access';
+import { detectBtqClassGender, isValidBtqClass } from '../utils/access';
 import {
   Save,
   Check,
@@ -125,6 +125,7 @@ export const BatchEvaluationTable: React.FC<BatchEvaluationTableProps> = ({
     new Date().toISOString().slice(0, 10)
   );
   const [searchTerm, setSearchTerm] = useState<string>('');
+  const [filterBtqGender, setFilterBtqGender] = useState<'' | 'PI' | 'PA'>('');
   const [filterBTQ, setFilterBTQ] = useState<string>('');
   const [filterKelasReguler, setFilterKelasReguler] = useState<string>('');
   const [autoSaveEnabled, setAutoSaveEnabled] = useState<boolean>(true);
@@ -133,15 +134,20 @@ export const BatchEvaluationTable: React.FC<BatchEvaluationTableProps> = ({
 
   const prevTanggalRef = useRef<string>(tanggal);
 
-  // Dynamic list of unique BTQ classes from students (excluding Tahfidz placeholders)
-  const availableKelasBTQ = useMemo(() => {
-    const set = new Set<string>();
+  // Dynamic list of unique BTQ classes grouped into Putri (PI) and Putra (PA)
+  const groupedKelasBTQ = useMemo(() => {
+    const piSet = new Set<string>();
+    const paSet = new Set<string>();
     students.forEach(s => {
-      if (isValidBtqClass(s.kelasBTQ)) {
-        set.add(s.kelasBTQ.trim());
-      }
+      if (!isValidBtqClass(s.kelasBTQ)) return;
+      const g = detectBtqClassGender(s.kelasBTQ, s.gender);
+      if (g === 'PI') piSet.add(s.kelasBTQ.trim());
+      else paSet.add(s.kelasBTQ.trim());
     });
-    return Array.from(set).sort();
+    return {
+      pi: Array.from(piSet).sort(),
+      pa: Array.from(paSet).sort()
+    };
   }, [students]);
 
   // Dynamic list of unique regular/formal classes from students
@@ -205,7 +211,7 @@ export const BatchEvaluationTable: React.FC<BatchEvaluationTableProps> = ({
     });
   }, [students, tanggal, bacaanList, absensiList]);
 
-  // Filtered rows for viewing based on Kelas BTQ and Kelas Reguler
+  // Filtered rows for viewing based on Putri (PI)/Putra (PA), Kelas BTQ, and Kelas Reguler
   const filteredList = useMemo(() => {
     return students.filter(s => {
       const matchSearch =
@@ -213,6 +219,9 @@ export const BatchEvaluationTable: React.FC<BatchEvaluationTableProps> = ({
         s.nisn.includes(searchTerm) ||
         s.kelas.toLowerCase().includes(searchTerm.toLowerCase()) ||
         s.kelasBTQ.toLowerCase().includes(searchTerm.toLowerCase());
+
+      const btqGender = detectBtqClassGender(s.kelasBTQ, s.gender);
+      const matchBtqGender = filterBtqGender ? btqGender === filterBtqGender : true;
 
       const matchBTQ = filterBTQ
         ? s.kelasBTQ.trim().toUpperCase() === filterBTQ.trim().toUpperCase()
@@ -222,9 +231,9 @@ export const BatchEvaluationTable: React.FC<BatchEvaluationTableProps> = ({
         ? s.kelas.trim().toUpperCase() === filterKelasReguler.trim().toUpperCase()
         : true;
 
-      return matchSearch && matchBTQ && matchReguler;
+      return matchSearch && matchBtqGender && matchBTQ && matchReguler;
     });
-  }, [students, searchTerm, filterBTQ, filterKelasReguler]);
+  }, [students, searchTerm, filterBtqGender, filterBTQ, filterKelasReguler]);
 
   // Count unsaved changes
   const unsavedTotalCount = useMemo(() => {
@@ -497,7 +506,10 @@ export const BatchEvaluationTable: React.FC<BatchEvaluationTableProps> = ({
             )}
           </div>
           <p className="text-xs text-slate-500 mt-0.5 leading-relaxed">
-            Nilai seluruh santri langsung dalam tabel. Klik <strong>Simpan</strong> di tiap baris atau <strong>Simpan Semua Penilaian</strong> untuk menyimpan permanen.
+            {user.role === 'guru_ngaji'
+              ? `Khusus menilai & mengabsen kelas BTQ binaan Anda (${user.assignedGroup || 'Kelas BTQ Anda'}). `
+              : 'Nilai seluruh santri BTQ (Putri PI & Putra PA) langsung dalam tabel. '}
+            Klik <strong>Simpan</strong> di tiap baris atau <strong>Simpan Semua Penilaian</strong> untuk menyimpan permanen.
           </p>
         </div>
 
@@ -592,18 +604,45 @@ export const BatchEvaluationTable: React.FC<BatchEvaluationTableProps> = ({
             <span>Filter Cepat:</span>
           </div>
 
-          {/* 1. Filter Kelas BTQ */}
+          {/* 0. Filter Kategori BTQ Putri (PI) vs Putra (PA) */}
+          <select
+            value={filterBtqGender}
+            onChange={e => {
+              setFilterBtqGender(e.target.value as '' | 'PI' | 'PA');
+              setFilterBTQ('');
+            }}
+            className="px-2.5 py-1.5 border border-slate-300 rounded-lg text-xs bg-white text-slate-800 font-semibold focus:outline-none focus:ring-1 focus:ring-emerald-500"
+          >
+            <option value="">Semua BTQ (PI &amp; PA)</option>
+            <option value="PI">Kelas BTQ Putri (PI)</option>
+            <option value="PA">Kelas BTQ Putra (PA)</option>
+          </select>
+
+          {/* 1. Filter Kelas BTQ (Dikelompokkan PI vs PA) */}
           <select
             value={filterBTQ}
             onChange={e => setFilterBTQ(e.target.value)}
             className="px-2.5 py-1.5 border border-slate-300 rounded-lg text-xs bg-white text-slate-800 font-medium focus:outline-none focus:ring-1 focus:ring-emerald-500"
           >
             <option value="">Semua Kelas BTQ</option>
-            {availableKelasBTQ.map(btq => (
-              <option key={btq} value={btq}>
-                {btq}
-              </option>
-            ))}
+            {groupedKelasBTQ.pi.length > 0 && filterBtqGender !== 'PA' && (
+              <optgroup label="Kelas BTQ Putri (PI)">
+                {groupedKelasBTQ.pi.map(btq => (
+                  <option key={btq} value={btq}>
+                    {btq}
+                  </option>
+                ))}
+              </optgroup>
+            )}
+            {groupedKelasBTQ.pa.length > 0 && filterBtqGender !== 'PI' && (
+              <optgroup label="Kelas BTQ Putra (PA)">
+                {groupedKelasBTQ.pa.map(btq => (
+                  <option key={btq} value={btq}>
+                    {btq}
+                  </option>
+                ))}
+              </optgroup>
+            )}
           </select>
 
           {/* 2. Filter Kelas Reguler */}
@@ -620,10 +659,11 @@ export const BatchEvaluationTable: React.FC<BatchEvaluationTableProps> = ({
             ))}
           </select>
 
-          {(filterBTQ || filterKelasReguler || searchTerm) && (
+          {(filterBtqGender || filterBTQ || filterKelasReguler || searchTerm) && (
             <button
               type="button"
               onClick={() => {
+                setFilterBtqGender('');
                 setFilterBTQ('');
                 setFilterKelasReguler('');
                 setSearchTerm('');
@@ -696,14 +736,28 @@ export const BatchEvaluationTable: React.FC<BatchEvaluationTableProps> = ({
                             </span>
                           )}
                         </div>
-                        <div className="text-[11px] text-slate-400 font-mono flex items-center gap-1.5 mt-0.5">
+                        <div className="text-[11px] text-slate-400 font-mono flex items-center gap-1.5 mt-0.5 flex-wrap">
                           <span>{student.nisn}</span>
                           <span>·</span>
                           <span className="font-sans font-semibold text-slate-600">{student.kelas}</span>
                           <span>·</span>
-                          <span className="font-sans text-emerald-800 font-semibold truncate max-w-[120px]">
+                          <span className="font-sans text-emerald-800 font-semibold truncate max-w-[130px]">
                             {student.kelasBTQ}
                           </span>
+                          {(() => {
+                            const g = detectBtqClassGender(student.kelasBTQ, student.gender);
+                            return g ? (
+                              <span
+                                className={`font-sans text-[10px] font-bold px-1.5 py-0.2 rounded ${
+                                  g === 'PI'
+                                    ? 'bg-rose-100 text-rose-800'
+                                    : 'bg-sky-100 text-sky-800'
+                                }`}
+                              >
+                                {g === 'PI' ? 'PI (Putri)' : 'PA (Putra)'}
+                              </span>
+                            ) : null;
+                          })()}
                         </div>
                       </td>
 

@@ -171,11 +171,22 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({
               <label className="text-xs font-bold text-slate-700 block mb-1">Jenis Kelamin:</label>
               <select
                 value={gender}
-                onChange={e => setGender(e.target.value as any)}
+                onChange={e => {
+                  const nextGender = e.target.value as 'L' | 'P';
+                  setGender(nextGender);
+                  setKelasBTQ(prev => {
+                    const upper = prev.trim().toUpperCase();
+                    if (!upper || upper === '-') return prev;
+                    if (nextGender === 'L') {
+                      return upper.replace(/\bPI\b/g, 'PA').replace(/\bPUTRI\b/g, 'PA');
+                    }
+                    return upper.replace(/\bPA\b/g, 'PI').replace(/\bPUTRA\b/g, 'PI');
+                  });
+                }}
                 className="w-full p-2 border border-slate-300 rounded-lg text-xs font-medium bg-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
               >
-                <option value="P">Santri Putri (Pi)</option>
-                <option value="L">Santri Putra (Pa)</option>
+                <option value="P">Santri Putri (PI)</option>
+                <option value="L">Santri Putra (PA)</option>
               </select>
             </div>
           </div>

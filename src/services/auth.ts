@@ -627,6 +627,29 @@ export const authService = {
     }
   },
 
+  /**
+   * Removes all Guru Ngaji / Guru Tahfidz accounts and resets auth logs
+   * while preserving Administrator and Wali Kelas accounts.
+   */
+  purgeTeacherAccounts(): void {
+    const accounts = this.getAccounts().filter(
+      a => a.role === 'admin' || a.role === 'wali_kelas'
+    );
+    this.saveAccounts(accounts);
+    try {
+      localStorage.removeItem(KEY_AUTH_LOGS);
+      const rawSession = sessionStorage.getItem(KEY_SESSION);
+      if (rawSession) {
+        const parsed = JSON.parse(rawSession);
+        if (parsed?.role !== 'admin' && parsed?.role !== 'wali_kelas') {
+          sessionStorage.removeItem(KEY_SESSION);
+        }
+      }
+    } catch {
+      // ignore
+    }
+  },
+
   async changeOwnPassword(
     accountId: string,
     currentPassword: string,

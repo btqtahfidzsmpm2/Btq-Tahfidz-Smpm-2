@@ -123,18 +123,28 @@ export default function App() {
 
   useEffect(() => {
     const init = async () => {
+      // 0. Clean slate wipe requested by user so portal starts 100% empty for fresh BTQ & Tahfidz imports
+      const wasWiped = storage.ensurePortalCleanedOnce();
+      if (wasWiped) {
+        authService.purgeTeacherAccounts();
+        setSelectedStudent(null);
+      }
+
       // 1. Deduplicate students so each name exists exactly once
       storage.deduplicateStudentsByName();
       // 2. Normalize legacy merged roles so Guru Ngaji (Kelas BTQ) & Guru Tahfidz (Program Tahfidz) stay distinct
       storage.normalizeTeacherRoles();
-      // 3. Purge any orphan sample teachers and synchronize real teachers from student records
-      storage.syncTeachersFromStudents(true);
+      // 3. Merge real teachers from student records without wiping separately imported Guru BTQ/Tahfidz
+      storage.syncTeachersFromStudents(false);
       await reloadData();
 
       // 4. Restore active validated session if available
       const savedSession = authService.getSavedSession();
       if (savedSession) {
         setUser(savedSession);
+      } else if (wasWiped) {
+        setUser(null);
+        setCurrentView('public');
       }
     };
     init();
@@ -242,11 +252,12 @@ export default function App() {
 
     if (deleteTarget.type === 'Semua Data') {
       storage.clearAllData();
+      authService.purgeTeacherAccounts();
       setSelectedStudent(null);
       addToast(
         'success',
         'Semua Data Dikosongkan',
-        'Seluruh data siswa, guru, bacaan, tahfidz, dan presensi telah dihapus. Silakan impor data baru.'
+        'Seluruh data siswa, guru BTQ/Tahfidz, akun guru, bacaan, tahfidz, rapor, dan presensi telah dihapus.'
       );
     } else if (deleteTarget.type === 'Siswa') {
       storage.deleteStudent(deleteTarget.idOrNisn);
@@ -426,6 +437,7 @@ export default function App() {
           <PresensiModal
             isOpen={showPresensiModal}
             onClose={() => setShowPresensiModal(false)}
+            user={user}
             students={getAuthorizedStudents(user, students)}
             onSuccess={reloadData}
             onNotify={addToast}

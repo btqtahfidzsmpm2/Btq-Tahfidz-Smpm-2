@@ -12,6 +12,7 @@ import {
 import { storage } from '../services/storage';
 import { downloadRaporPdf, downloadClassSummaryPdf } from '../services/raporPdf';
 import { RaporPrintableSheet, ClassSummaryPrintableSheet } from './RaporPrintableSheet';
+import { detectBtqClassGender, isValidBtqClass } from '../utils/access';
 import {
   Printer,
   ClipboardList,
@@ -106,12 +107,25 @@ export const ReportCenterPanel: React.FC<ReportCenterPanelProps> = ({
   const availableBTQ = useMemo(() => {
     const set = new Set<string>();
     students.forEach(s => {
-      if (s.kelasBTQ && s.kelasBTQ.trim() && s.kelasBTQ !== '-') {
+      if (isValidBtqClass(s.kelasBTQ)) {
         set.add(s.kelasBTQ.trim());
       }
     });
-    return Array.from(set).sort();
+    return Array.from(set).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
   }, [students]);
+
+  const groupedBTQ = useMemo(() => {
+    const putri: string[] = [];
+    const putra: string[] = [];
+    const other: string[] = [];
+    availableBTQ.forEach(k => {
+      const g = detectBtqClassGender(k);
+      if (g === 'PI') putri.push(k);
+      else if (g === 'PA') putra.push(k);
+      else other.push(k);
+    });
+    return { putri, putra, other };
+  }, [availableBTQ]);
 
   // Handle preselected student coming from Admin Student List quick-print button
   useEffect(() => {
@@ -680,8 +694,26 @@ export const ReportCenterPanel: React.FC<ReportCenterPanelProps> = ({
                         onChange={e => setSelectedBTQ(e.target.value)}
                         className="px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs bg-white text-slate-700 font-medium"
                       >
-                        <option value="">Semua Kelompok BTQ</option>
-                        {availableBTQ.map(b => (
+                        <option value="">Semua Kelompok BTQ (PI &amp; PA)</option>
+                        {groupedBTQ.putri.length > 0 && (
+                          <optgroup label="Kelas BTQ Putri (PI)">
+                            {groupedBTQ.putri.map(b => (
+                              <option key={b} value={b}>
+                                {b}
+                              </option>
+                            ))}
+                          </optgroup>
+                        )}
+                        {groupedBTQ.putra.length > 0 && (
+                          <optgroup label="Kelas BTQ Putra (PA)">
+                            {groupedBTQ.putra.map(b => (
+                              <option key={b} value={b}>
+                                {b}
+                              </option>
+                            ))}
+                          </optgroup>
+                        )}
+                        {groupedBTQ.other.map(b => (
                           <option key={b} value={b}>
                             {b}
                           </option>

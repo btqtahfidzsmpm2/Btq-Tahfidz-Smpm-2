@@ -112,18 +112,23 @@ export const InputUjianModal: React.FC<InputUjianModalProps> = ({
         <form onSubmit={handleSubmit} className="space-y-3 pt-3">
           
           <div>
-            <label className="text-xs font-bold text-slate-700 block mb-1">Pilih Siswa:</label>
+            <label className="text-xs font-bold text-slate-700 block mb-1">Pilih Siswa (Kelas Binaan):</label>
             <select
               value={nisn}
               onChange={e => setNisn(e.target.value)}
               required
-              className="w-full p-2 border border-slate-300 rounded-lg text-xs font-medium bg-white focus:outline-none focus:ring-1 focus:ring-purple-500"
+              disabled={students.length === 0}
+              className="w-full p-2 border border-slate-300 rounded-lg text-xs font-medium bg-white focus:outline-none focus:ring-1 focus:ring-purple-500 disabled:bg-slate-100 disabled:text-slate-400"
             >
-              {students.map(s => (
-                <option key={s.id} value={s.nisn}>
-                  {s.nama} ({s.kelas} · {s.kelasBTQ})
-                </option>
-              ))}
+              {students.length === 0 ? (
+                <option value="">Belum ada siswa di kelas binaan Anda</option>
+              ) : (
+                students.map(s => (
+                  <option key={s.id} value={s.nisn}>
+                    {s.nama} ({s.kelas} · {s.kelasBTQ} · {s.gender === 'P' ? 'PI' : 'PA'})
+                  </option>
+                ))
+              )}
             </select>
           </div>
 
@@ -230,7 +235,8 @@ export const InputUjianModal: React.FC<InputUjianModalProps> = ({
             </button>
             <button
               type="submit"
-              className="w-1/2 py-2 px-3 bg-purple-700 hover:bg-purple-800 text-white rounded-xl text-xs font-bold transition-colors shadow-sm"
+              disabled={!nisn || students.length === 0}
+              className="w-1/2 py-2 px-3 bg-purple-700 hover:bg-purple-800 disabled:bg-slate-300 disabled:cursor-not-allowed text-white rounded-xl text-xs font-bold transition-colors shadow-sm"
             >
               Simpan Hasil Ujian
             </button>

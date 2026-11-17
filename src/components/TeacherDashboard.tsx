@@ -20,6 +20,7 @@ import {
   getAuthorizedTahfidzStudents,
   canTeachNgaji,
   canTeachTahfidz,
+  detectBtqClassGender,
   isValidBtqClass,
   matchesTeacherName
 } from '../utils/access';
@@ -122,6 +123,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   // Filters for Students
   const [filterClass, setFilterClass] = useState<string>('');
   const [filterBTQ, setFilterBTQ] = useState<string>('');
+  const [filterBtqGender, setFilterBtqGender] = useState<'' | 'PI' | 'PA'>('');
   const [filterProgram, setFilterProgram] = useState<'' | 'btq' | 'tahfidz' | 'non_tahfidz'>('');
   const [filterGender, setFilterGender] = useState<string>('');
   const [searchTerm, setSearchTerm] = useState<string>('');
@@ -160,16 +162,21 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
     );
   }, [tahfidzStudents, tahfidzSearch]);
 
-  // Dynamic list of unique BTQ classes (excluding Tahfidz placeholders)
-  const availableKelasBTQ = useMemo(() => {
+  // Dynamic list of unique BTQ classes grouped into Putri (PI) and Putra (PA)
+  const groupedKelasBTQ = useMemo(() => {
     const source = user.role === 'admin' ? students : authorizedStudents;
-    const set = new Set<string>();
+    const piSet = new Set<string>();
+    const paSet = new Set<string>();
     source.forEach(s => {
-      if (isValidBtqClass(s.kelasBTQ)) {
-        set.add(s.kelasBTQ.trim());
-      }
+      if (!isValidBtqClass(s.kelasBTQ)) return;
+      const g = detectBtqClassGender(s.kelasBTQ, s.gender);
+      if (g === 'PI') piSet.add(s.kelasBTQ.trim());
+      else paSet.add(s.kelasBTQ.trim());
     });
-    return Array.from(set).sort();
+    return {
+      pi: Array.from(piSet).sort(),
+      pa: Array.from(paSet).sort()
+    };
   }, [user.role, students, authorizedStudents]);
 
   // Combined search and sub-filters for Students
@@ -187,6 +194,10 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
       const matchBTQ = filterBTQ
         ? s.kelasBTQ.trim().toUpperCase() === filterBTQ.trim().toUpperCase()
         : true;
+      const btqGender = isValidBtqClass(s.kelasBTQ)
+        ? detectBtqClassGender(s.kelasBTQ, s.gender)
+        : null;
+      const matchBtqGender = filterBtqGender ? btqGender === filterBtqGender : true;
       const matchProgram =
         filterProgram === 'btq'
           ? isValidBtqClass(s.kelasBTQ)
@@ -197,9 +208,24 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
           : true;
       const matchGender = filterGender ? s.gender === filterGender : true;
 
-      return matchSearch && matchClass && matchBTQ && matchProgram && matchGender;
+      return (
+        matchSearch &&
+        matchClass &&
+        matchBTQ &&
+        matchBtqGender &&
+        matchProgram &&
+        matchGender
+      );
     });
-  }, [authorizedStudents, searchTerm, filterClass, filterBTQ, filterProgram, filterGender]);
+  }, [
+    authorizedStudents,
+    searchTerm,
+    filterClass,
+    filterBTQ,
+    filterBtqGender,
+    filterProgram,
+    filterGender
+  ]);
 
   // Filtered Teachers
   const filteredTeachers = useMemo(() => {
@@ -850,18 +876,47 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                   <option value="9D">9D (Putra)</option>
                 </select>
 
-                {/* Filter Kelas BTQ (Sesuai dengan Kelas BTQ Data Siswa) */}
+                {/* Filter Kategori BTQ Putri (PI) vs Putra (PA) */}
+                {user.role !== 'guru_tahfidz' && (
+                  <select
+                    value={filterBtqGender}
+                    onChange={e => {
+                      setFilterBtqGender(e.target.value as '' | 'PI' | 'PA');
+                      setFilterBTQ('');
+                    }}
+                    className="px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs bg-white text-slate-700 font-semibold focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                  >
+                    <option value="">Semua BTQ (PI &amp; PA)</option>
+                    <option value="PI">Kelas BTQ Putri (PI)</option>
+                    <option value="PA">Kelas BTQ Putra (PA)</option>
+                  </select>
+                )}
+
+                {/* Filter Kelas BTQ (Dikelompokkan Putri PI vs Putra PA) */}
                 <select
                   value={filterBTQ}
                   onChange={e => setFilterBTQ(e.target.value)}
                   className="px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs bg-white text-slate-700 font-medium focus:outline-none focus:ring-1 focus:ring-emerald-500"
                 >
                   <option value="">Semua Kelas BTQ</option>
-                  {availableKelasBTQ.map(btq => (
-                    <option key={btq} value={btq}>
-                      {btq}
-                    </option>
-                  ))}
+                  {groupedKelasBTQ.pi.length > 0 && filterBtqGender !== 'PA' && (
+                    <optgroup label="Kelas BTQ Putri (PI)">
+                      {groupedKelasBTQ.pi.map(btq => (
+                        <option key={btq} value={btq}>
+                          {btq}
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
+                  {groupedKelasBTQ.pa.length > 0 && filterBtqGender !== 'PI' && (
+                    <optgroup label="Kelas BTQ Putra (PA)">
+                      {groupedKelasBTQ.pa.map(btq => (
+                        <option key={btq} value={btq}>
+                          {btq}
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
                 </select>
 
                 {/* Filter Program (BTQ vs Tahfidz) */}
@@ -889,11 +944,12 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                   <option value="L">Santri Putra</option>
                 </select>
 
-                {(filterClass || filterBTQ || filterProgram || filterGender || searchTerm) && (
+                {(filterClass || filterBTQ || filterBtqGender || filterProgram || filterGender || searchTerm) && (
                   <button
                     onClick={() => {
                       setFilterClass('');
                       setFilterBTQ('');
+                      setFilterBtqGender('');
                       setFilterProgram('');
                       setFilterGender('');
                       setSearchTerm('');
@@ -973,8 +1029,33 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                         </td>
 
                         <td className="p-3">
-                          <div className={`font-semibold ${isValidBtqClass(student.kelasBTQ) ? 'text-emerald-800' : 'text-slate-400 italic font-normal'}`}>
-                            {isValidBtqClass(student.kelasBTQ) ? `BTQ: ${student.kelasBTQ}` : 'Tidak ikut Kelas BTQ'}
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span
+                              className={`font-semibold ${
+                                isValidBtqClass(student.kelasBTQ)
+                                  ? 'text-emerald-800'
+                                  : 'text-slate-400 italic font-normal'
+                              }`}
+                            >
+                              {isValidBtqClass(student.kelasBTQ)
+                                ? `BTQ: ${student.kelasBTQ}`
+                                : 'Tidak ikut Kelas BTQ'}
+                            </span>
+                            {isValidBtqClass(student.kelasBTQ) &&
+                              (() => {
+                                const g = detectBtqClassGender(student.kelasBTQ, student.gender);
+                                return g ? (
+                                  <span
+                                    className={`text-[10px] font-bold px-1.5 py-0.2 rounded ${
+                                      g === 'PI'
+                                        ? 'bg-rose-100 text-rose-800'
+                                        : 'bg-sky-100 text-sky-800'
+                                    }`}
+                                  >
+                                    {g === 'PI' ? 'PI · Putri' : 'PA · Putra'}
+                                  </span>
+                                ) : null;
+                              })()}
                           </div>
                           {student.isTahfidz ? (
                             <span className="text-[10px] font-semibold text-amber-700 block mt-0.5">

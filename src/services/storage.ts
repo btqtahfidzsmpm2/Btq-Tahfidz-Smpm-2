@@ -10,6 +10,7 @@ import {
   RaporSettings
 } from '../types';
 import { INITIAL_STUDENTS, INITIAL_BACAAN, INITIAL_TAHFIDZ, INITIAL_ABSENSI, INITIAL_TEACHERS } from '../data/initialData';
+import { formatBtqClassWithGender, isValidBtqClass } from '../utils/access';
 
 const KEY_STUDENTS = 'spemda_students_v4_clean';
 const KEY_TEACHERS = 'spemda_teachers_v2_clean';
@@ -20,6 +21,7 @@ const KEY_RAPOR_STATUS = 'spemda_rapor_status_v1';
 const KEY_RAPOR_LOGS = 'spemda_rapor_logs_v1';
 const KEY_RAPOR_SETTINGS = 'spemda_rapor_settings_v1';
 const KEY_PURGED_LEGACY = 'spemda_sample_purged_v1';
+const KEY_PORTAL_CLEANED_V2 = 'spemda_portal_cleaned_v2';
 
 function purgeLegacySampleKeysOnce() {
   try {
@@ -165,21 +167,71 @@ export const storage = {
   },
 
   recordAttendanceBatch(nisnList: string[], sesi: 'btq' | 'tahfidz', tanggal: string): void {
-    const list = this.getAbsensi();
-    const newRecords: AbsensiRecord[] = nisnList.map(nisn => ({
-      id: 'abs-' + Date.now() + '-' + nisn,
-      nisn,
-      tanggal,
+    this.saveAttendanceBatch(
+      nisnList.map(nisn => ({ nisn, status: 'Hadir' as const })),
       sesi,
-      status: 'Hadir'
-    }));
-    this.saveAbsensi([...newRecords, ...list]);
+      tanggal
+    );
+  },
+
+  /**
+   * Upserts daily attendance per (nisn, tanggal, sesi) and recalculates student kehadiranPersen.
+   */
+  saveAttendanceBatch(
+    entries: Array<{ nisn: string; status: 'Hadir' | 'Sakit' | 'Izin' | 'Alpa' }>,
+    sesi: 'btq' | 'tahfidz',
+    tanggal: string
+  ): { savedCount: number } {
+    if (entries.length === 0) return { savedCount: 0 };
+
+    const absensiList = [...this.getAbsensi()];
+    const students = this.getStudents();
+
+    entries.forEach((entry, idx) => {
+      const existingIdx = absensiList.findIndex(
+        a => a.nisn === entry.nisn && a.tanggal === tanggal && a.sesi === sesi
+      );
+      const record: AbsensiRecord = {
+        id:
+          existingIdx !== -1
+            ? absensiList[existingIdx].id
+            : `abs-${Date.now()}-${idx}-${entry.nisn}`,
+        nisn: entry.nisn,
+        tanggal,
+        sesi,
+        status: entry.status,
+        keterangan: sesi === 'btq' ? 'Sesi Halaqah BTQ' : 'Sesi Halaqah Tahfidz'
+      };
+
+      if (existingIdx !== -1) {
+        absensiList[existingIdx] = record;
+      } else {
+        absensiList.unshift(record);
+      }
+
+      const sIdx = students.findIndex(s => s.nisn === entry.nisn);
+      if (sIdx !== -1) {
+        const studentAbs = absensiList.filter(a => a.nisn === entry.nisn);
+        if (studentAbs.length > 0) {
+          const hadirCount = studentAbs.filter(a => a.status === 'Hadir').length;
+          students[sIdx].kehadiranPersen = Math.round((hadirCount / studentAbs.length) * 100);
+        }
+      }
+    });
+
+    this.saveAbsensi(absensiList);
+    this.saveStudents(students);
+    return { savedCount: entries.length };
   },
 
   addStudent(student: Omit<Student, 'id'>): Student {
     const students = this.getStudents();
+    const normalizedBtq = isValidBtqClass(student.kelasBTQ)
+      ? formatBtqClassWithGender(student.kelasBTQ, student.gender)
+      : '-';
     const newStudent: Student = {
       ...student,
+      kelasBTQ: normalizedBtq,
       id: 'std-' + Date.now()
     };
     const updated = [newStudent, ...students];
@@ -205,9 +257,16 @@ export const storage = {
     const students = this.getStudents();
     const idx = students.findIndex(s => s.nisn === nisn);
     if (idx !== -1) {
+      const mergedGender = updatedData.gender || students[idx].gender;
+      const mergedRawBtq =
+        updatedData.kelasBTQ !== undefined ? updatedData.kelasBTQ : students[idx].kelasBTQ;
+      const normalizedBtq = isValidBtqClass(mergedRawBtq)
+        ? formatBtqClassWithGender(mergedRawBtq, mergedGender)
+        : '-';
       students[idx] = {
         ...students[idx],
-        ...updatedData
+        ...updatedData,
+        kelasBTQ: normalizedBtq
       };
       this.saveStudents(students);
     }
@@ -278,7 +337,7 @@ export const storage = {
   normalizeTeacherRoles(): { updatedCount: number } {
     let updatedCount = 0;
     try {
-      // 1. Clean up students where kelasBTQ was set to 'PROGRAM TAHFIDZ'
+      // 1. Clean up students where kelasBTQ was set to 'PROGRAM TAHFIDZ' and normalize PI/PA
       const students = this.getStudents();
       let studentsChanged = false;
       const cleanedStudents = students.map(s => {
@@ -291,6 +350,16 @@ export const storage = {
             halaqahTahfidz: s.halaqahTahfidz || 'HALAQAH TAHFIDZ',
             pembimbingTahfidz: s.pembimbingTahfidz || (s.pengajar && s.pengajar !== '-' ? s.pengajar : undefined)
           };
+        }
+        if (isValidBtqClass(s.kelasBTQ)) {
+          const normBtq = formatBtqClassWithGender(s.kelasBTQ, s.gender);
+          if (normBtq !== s.kelasBTQ) {
+            studentsChanged = true;
+            return {
+              ...s,
+              kelasBTQ: normBtq
+            };
+          }
         }
         return s;
       });
@@ -620,7 +689,14 @@ export const storage = {
       nameToNisnMap.set(norm, s.nisn);
     });
 
-    incoming.forEach((inc, idx) => {
+    incoming.forEach((rawInc, idx) => {
+      const normalizedBtq = isValidBtqClass(rawInc.kelasBTQ)
+        ? formatBtqClassWithGender(rawInc.kelasBTQ, rawInc.gender)
+        : '-';
+      const inc: Omit<Student, 'id'> = {
+        ...rawInc,
+        kelasBTQ: normalizedBtq
+      };
       const normName = (inc.nama || '').trim().toUpperCase().replace(/\s+/g, ' ');
       const existingNisn = studentMap.has(inc.nisn) ? inc.nisn : nameToNisnMap.get(normName);
 
@@ -658,10 +734,78 @@ export const storage = {
     const result = Array.from(studentMap.values());
     this.saveStudents(result);
 
-    // Sync teachers cleanly (preserving manually added multi-class teachers & merging dual roles)
+    // Sync teachers cleanly (preserving manually added/imported teachers)
     const syncedTeachers = this.syncTeachersFromStudents(false);
 
     return { added, updated, total: result.length, teachersCount: syncedTeachers.total };
+  },
+
+  /**
+   * Dedicated batch import for Teachers strictly separated by role ('guru_ngaji' vs 'guru_tahfidz').
+   */
+  importTeachersBatch(
+    incoming: Array<{
+      nama: string;
+      kelompok: string;
+      ruangan: string;
+      kontak?: string;
+    }>,
+    role: 'guru_ngaji' | 'guru_tahfidz'
+  ): { added: number; updated: number; total: number } {
+    const existing = this.getTeachers();
+    const map = new Map<string, Teacher>();
+    existing.forEach(t => {
+      const normalizedRole: Teacher['role'] =
+        t.role === 'guru_tahfidz' ? 'guru_tahfidz' : 'guru_ngaji';
+      map.set(`${t.nama.trim().toUpperCase()}::${normalizedRole}`, {
+        ...t,
+        role: normalizedRole
+      });
+    });
+
+    let added = 0;
+    let updated = 0;
+
+    incoming.forEach((inc, idx) => {
+      const cleanName = inc.nama.trim().toUpperCase();
+      if (!cleanName) return;
+      const key = `${cleanName}::${role}`;
+      const existingTeacher = map.get(key);
+      const cleanGroup =
+        inc.kelompok.trim() || (role === 'guru_tahfidz' ? 'HALAQAH TAHFIDZ' : 'BTQ REGULER');
+      const cleanRoom =
+        inc.ruangan.trim() || (role === 'guru_tahfidz' ? 'RUANGAN TAHFIDZ' : 'RUANGAN KELAS');
+
+      if (existingTeacher) {
+        map.set(key, {
+          ...existingTeacher,
+          role,
+          kelompokBTQ: cleanGroup,
+          kelompokTahfidz: role === 'guru_tahfidz' ? cleanGroup : existingTeacher.kelompokTahfidz,
+          ruangan: cleanRoom,
+          kontak: inc.kontak?.trim() || existingTeacher.kontak
+        });
+        updated++;
+      } else {
+        map.set(key, {
+          id: `tch-${role === 'guru_tahfidz' ? 'thf' : 'btq'}-${Date.now()}-${idx}`,
+          nama: cleanName,
+          role,
+          kelompokBTQ: cleanGroup,
+          kelompokTahfidz: role === 'guru_tahfidz' ? cleanGroup : undefined,
+          ruangan: cleanRoom,
+          kontak: inc.kontak?.trim() || undefined
+        });
+        added++;
+      }
+    });
+
+    const result = Array.from(map.values()).sort((a, b) => {
+      if (a.role !== b.role) return a.role.localeCompare(b.role);
+      return a.nama.localeCompare(b.nama);
+    });
+    this.saveTeachers(result);
+    return { added, updated, total: result.length };
   },
 
   /**
@@ -1029,6 +1173,24 @@ export const storage = {
 
   resetAllRaporStatuses(): void {
     this.saveRaporPrintStatuses({});
+  },
+
+  ensurePortalCleanedOnce(): boolean {
+    try {
+      if (localStorage.getItem(KEY_PORTAL_CLEANED_V2) !== '1') {
+        this.clearAllData();
+        localStorage.removeItem('spemda_students_v3');
+        localStorage.removeItem('spemda_teachers_v1');
+        localStorage.removeItem('spemda_bacaan_v3');
+        localStorage.removeItem('spemda_tahfidz_v3');
+        localStorage.removeItem('spemda_absensi_v3');
+        localStorage.setItem(KEY_PORTAL_CLEANED_V2, '1');
+        return true;
+      }
+    } catch {
+      // ignore
+    }
+    return false;
   },
 
   clearAllData(): void {
