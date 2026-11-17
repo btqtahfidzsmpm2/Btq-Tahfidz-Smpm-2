@@ -1,6 +1,16 @@
 import React, { useState, useMemo } from 'react';
-import { Role, UserAccount, UserSession, AuthLogEntry } from '../types';
+import {
+  Role,
+  UserAccount,
+  UserSession,
+  AuthLogEntry,
+  Teacher,
+  Student,
+  AccessRequest
+} from '../types';
 import { authService, generateStrongPassword, evaluatePasswordStrength } from '../services/auth';
+import { cloudDb, StaffDirectoryRecord } from '../services/cloudDb';
+import { sanitizeDocId, normalizeEmail } from '../services/firebase';
 import { HOMEROOM_CLASSES } from '../data/initialData';
 import {
   Shield,
@@ -19,27 +29,58 @@ import {
   Power,
   Trash2,
   X,
-  Edit3
+  Edit3,
+  Cloud,
+  UserCheck,
+  XCircle,
+  Mail
 } from 'lucide-react';
 
 interface AccountSecurityPanelProps {
   currentUser: UserSession;
   accounts: UserAccount[];
   logs: AuthLogEntry[];
+  teachers?: Teacher[];
+  staffDirectory?: StaffDirectoryRecord[];
+  accessRequests?: AccessRequest[];
+  students?: Student[];
   onRefreshAccounts: () => void;
   onNotify: (type: 'success' | 'error' | 'info', title: string, desc?: string) => void;
+}
+
+interface PendingApprovalDraft {
+  role: 'guru_ngaji' | 'guru_tahfidz' | 'wali_kelas';
+  teacherId: string;
+  assignedClass: string;
+  customNama: string;
+  customGroup: string;
 }
 
 export const AccountSecurityPanel: React.FC<AccountSecurityPanelProps> = ({
   currentUser,
   accounts,
   logs,
+  teachers = [],
+  staffDirectory = [],
+  accessRequests = [],
+  students = [],
   onRefreshAccounts,
   onNotify
 }) => {
   const [roleFilter, setRoleFilter] = useState<'all' | Role>('all');
   const [searchTerm, setSearchTerm] = useState('');
   const [subView, setSubView] = useState<'accounts' | 'logs'>('accounts');
+
+  // Cloud Access Request Approval State
+  const [approvalDrafts, setApprovalDrafts] = useState<Record<string, PendingApprovalDraft>>({});
+  const [processingReqUid, setProcessingReqUid] = useState<string | null>(null);
+
+  // Wali Kelas Gmail Binding State
+  const [showWaliBinding, setShowWaliBinding] = useState(false);
+  const [waliClass, setWaliClass] = useState(HOMEROOM_CLASSES[0]);
+  const [waliNama, setWaliNama] = useState('');
+  const [waliEmail, setWaliEmail] = useState('');
+  const [isSavingWali, setIsSavingWali] = useState(false);
 
   // Reset Password Modal state
   const [resetTarget, setResetTarget] = useState<UserAccount | null>(null);
@@ -248,8 +289,457 @@ export const AccountSecurityPanel: React.FC<AccountSecurityPanelProps> = ({
     }
   };
 
+  const pendingRequests = useMemo(
+    () => accessRequests.filter(r => r.status === 'pending'),
+    [accessRequests]
+  );
+
+  const waliDirectoryEntries = useMemo(
+    () => staffDirectory.filter(s => s.role === 'wali_kelas' && Boolean(s.email)),
+    [staffDirectory]
+  );
+
+  const getDraftForRequest = (req: AccessRequest): PendingApprovalDraft => {
+    const existing = approvalDrafts[req.uid];
+    if (existing) return existing;
+
+    const reqNameLower = req.nama.trim().toLowerCase();
+    const matchedTeacher = teachers.find(
+      t =>
+        t.role === req.requestedRole &&
+        (t.nama.trim().toLowerCase() === reqNameLower ||
+          t.nama.trim().toLowerCase().includes(reqNameLower) ||
+          reqNameLower.includes(t.nama.trim().toLowerCase()))
+    );
+
+    const matchedClass =
+      HOMEROOM_CLASSES.find(c =>
+        req.requestedNote.toUpperCase().includes(c.toUpperCase())
+      ) || HOMEROOM_CLASSES[0];
+
+    return {
+      role: req.requestedRole,
+      teacherId: matchedTeacher?.id || '',
+      assignedClass: matchedClass,
+      customNama: req.nama,
+      customGroup: req.requestedNote || ''
+    };
+  };
+
+  const updateDraftForRequest = (
+    req: AccessRequest,
+    patch: Partial<PendingApprovalDraft>
+  ) => {
+    const current = getDraftForRequest(req);
+    setApprovalDrafts(prev => ({
+      ...prev,
+      [req.uid]: { ...current, ...patch }
+    }));
+  };
+
+  const handleApproveRequest = async (req: AccessRequest) => {
+    if (processingReqUid) return;
+    const draft = getDraftForRequest(req);
+    setProcessingReqUid(req.uid);
+
+    try {
+      const effectiveDir = [...staffDirectory];
+      let teacherId = draft.teacherId || undefined;
+      let nama = draft.customNama.trim() || req.nama;
+      let assignedGroup: string | undefined;
+      let assignedTahfidzGroup: string | undefined;
+      let assignedClass: string | undefined;
+
+      if (draft.role === 'wali_kelas') {
+        assignedClass = draft.assignedClass;
+      } else {
+        const pickedTeacher = teachers.find(t => t.id === draft.teacherId);
+        if (pickedTeacher) {
+          teacherId = pickedTeacher.id;
+          nama = pickedTeacher.nama;
+          assignedGroup = pickedTeacher.kelompokBTQ;
+          assignedTahfidzGroup = pickedTeacher.kelompokTahfidz;
+        } else {
+          // Create new staffDirectory record so email ACL computes cleanly
+          const newTeacherId = sanitizeDocId(
+            `${draft.role === 'guru_tahfidz' ? 'tch-tahfidz' : 'tch-btq'}-${nama.toLowerCase()}`,
+            128
+          );
+          teacherId = newTeacherId;
+          if (draft.role === 'guru_tahfidz') {
+            assignedTahfidzGroup = draft.customGroup.trim() || 'HALAQAH TAHFIDZ';
+          } else {
+            assignedGroup = draft.customGroup.trim() || '-';
+          }
+          const newDirEntry: StaffDirectoryRecord = {
+            id: newTeacherId,
+            nama,
+            role: draft.role,
+            kelompokBTQ: assignedGroup || '-',
+            kelompokTahfidz: assignedTahfidzGroup,
+            ruangan: '-',
+            email: normalizeEmail(req.email)
+          };
+          await cloudDb.saveStaffDirectoryBatch([newDirEntry]);
+          effectiveDir.push(newDirEntry);
+        }
+      }
+
+      await cloudDb.approveAccessRequestCloud({
+        request: req,
+        targetRole: draft.role,
+        nama,
+        teacherId,
+        assignedGroup,
+        assignedTahfidzGroup,
+        assignedClass,
+        allStudents: students,
+        staffDir: effectiveDir
+      });
+
+      onNotify(
+        'success',
+        'Akses Google Disetujui',
+        `${req.email} telah ditautkan sebagai ${getRoleLabel(draft.role)} (${nama}) dan siap login real-time.`
+      );
+    } catch (err: any) {
+      onNotify('error', 'Gagal Menyetujui Akses', err?.message || 'Terjadi kendala saat menyimpan ke Cloud.');
+    } finally {
+      setProcessingReqUid(null);
+    }
+  };
+
+  const handleRejectRequest = async (req: AccessRequest) => {
+    if (processingReqUid) return;
+    setProcessingReqUid(req.uid);
+    try {
+      await cloudDb.rejectAccessRequestCloud(req.uid);
+      onNotify('info', 'Permintaan Ditolak', `Permintaan akses dari ${req.email} telah ditolak.`);
+    } catch (err: any) {
+      onNotify('error', 'Gagal Menolak Permintaan', err?.message || 'Terjadi kendala jaringan.');
+    } finally {
+      setProcessingReqUid(null);
+    }
+  };
+
+  const handleSaveWaliGmail = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleanEmail = normalizeEmail(waliEmail);
+    if (!cleanEmail || !cleanEmail.includes('@')) {
+      onNotify('error', 'Email Tidak Valid', 'Masukkan alamat Gmail Wali Kelas yang valid.');
+      return;
+    }
+
+    setIsSavingWali(true);
+    try {
+      const waliId = sanitizeDocId(`wali-${waliClass.toLowerCase()}`, 128);
+      const waliEntry: StaffDirectoryRecord = {
+        id: waliId,
+        nama: waliNama.trim() || `Wali Kelas ${waliClass}`,
+        role: 'wali_kelas',
+        kelompokBTQ: '-',
+        assignedClass: waliClass,
+        ruangan: `KELAS ${waliClass}`,
+        email: cleanEmail
+      };
+
+      await cloudDb.saveStaffDirectoryBatch([waliEntry]);
+
+      const nextDir = [...staffDirectory];
+      const idx = nextDir.findIndex(d => d.id === waliId);
+      if (idx !== -1) nextDir[idx] = waliEntry;
+      else nextDir.push(waliEntry);
+
+      await cloudDb.recomputeAllPermissionsCloud(students, nextDir);
+
+      onNotify(
+        'success',
+        'Email Wali Kelas Ditautkan',
+        `Wali Kelas ${waliClass} (${cleanEmail}) kini dapat login via Google dalam mode pantau read-only.`
+      );
+      setWaliNama('');
+      setWaliEmail('');
+    } catch (err: any) {
+      onNotify('error', 'Gagal Menautkan Wali Kelas', err?.message || 'Gagal menyimpan ke Cloud.');
+    } finally {
+      setIsSavingWali(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
+
+      {/* CLOUD GOOGLE ACCESS REQUESTS & WALI KELAS BINDING (ADMIN CLOUD) */}
+      {currentUser.role === 'admin' && currentUser.authProvider === 'google' && (
+        <div className="space-y-4">
+          {pendingRequests.length > 0 && (
+            <section className="bg-sky-50/90 border border-sky-200 rounded-2xl p-4 sm:p-5 space-y-4 shadow-2xs">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-xl bg-sky-700 text-white flex items-center justify-center shrink-0">
+                    <Cloud className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h3 className="text-xs sm:text-sm font-extrabold text-sky-950">
+                      Permintaan Akses Google Masuk ({pendingRequests.length})
+                    </h3>
+                    <p className="text-[11px] text-sky-800">
+                      Guru atau Wali Kelas yang login via Google menunggu penautan akun agar dapat mengakses data siswa binaannya secara real-time.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                {pendingRequests.map(req => {
+                  const draft = getDraftForRequest(req);
+                  const matchingTeachers = teachers.filter(t => t.role === draft.role);
+                  const isBusy = processingReqUid === req.uid;
+
+                  return (
+                    <div
+                      key={req.uid}
+                      className="bg-white rounded-xl border border-sky-200 p-3.5 space-y-3 shadow-2xs"
+                    >
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                        <div>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-xs font-extrabold text-slate-900">{req.nama}</span>
+                            <code className="text-[11px] px-2 py-0.5 bg-sky-50 text-sky-900 border border-sky-200 rounded font-mono">
+                              {req.email}
+                            </code>
+                          </div>
+                          <p className="text-[11px] text-slate-500 mt-0.5">
+                            Mengajukan: <strong className="uppercase">{getRoleLabel(req.requestedRole)}</strong> · Catatan: <strong className="text-slate-700">{req.requestedNote || '-'}</strong>
+                          </p>
+                        </div>
+
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <button
+                            type="button"
+                            disabled={isBusy}
+                            onClick={() => handleRejectRequest(req)}
+                            className="px-2.5 py-1.5 text-[11px] font-bold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-lg flex items-center gap-1 disabled:opacity-50"
+                          >
+                            <XCircle className="w-3.5 h-3.5" />
+                            <span>Tolak</span>
+                          </button>
+                          <button
+                            type="button"
+                            disabled={isBusy}
+                            onClick={() => handleApproveRequest(req)}
+                            className="px-3 py-1.5 text-[11px] font-bold text-white bg-emerald-800 hover:bg-emerald-700 rounded-lg flex items-center gap-1 shadow-2xs disabled:opacity-50"
+                          >
+                            <UserCheck className="w-3.5 h-3.5" />
+                            <span>{isBusy ? 'Memproses...' : 'Setujui & Tautkan Akun'}</span>
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-2 border-t border-slate-100">
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">
+                            Peran Tujuan
+                          </label>
+                          <select
+                            value={draft.role}
+                            onChange={e =>
+                              updateDraftForRequest(req, {
+                                role: e.target.value as 'guru_ngaji' | 'guru_tahfidz' | 'wali_kelas',
+                                teacherId: ''
+                              })
+                            }
+                            className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg text-xs font-semibold bg-white"
+                          >
+                            <option value="guru_ngaji">Guru Ngaji (BTQ)</option>
+                            <option value="guru_tahfidz">Guru Tahfidz</option>
+                            <option value="wali_kelas">Wali Kelas (Read-Only)</option>
+                          </select>
+                        </div>
+
+                        {draft.role === 'wali_kelas' ? (
+                          <>
+                            <div>
+                              <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">
+                                Kelas Formal Binaan
+                              </label>
+                              <select
+                                value={draft.assignedClass}
+                                onChange={e =>
+                                  updateDraftForRequest(req, { assignedClass: e.target.value })
+                                }
+                                className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg text-xs font-semibold bg-white"
+                              >
+                                {HOMEROOM_CLASSES.map(c => (
+                                  <option key={c} value={c}>
+                                    Kelas {c}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                            <div>
+                              <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">
+                                Nama Wali Kelas
+                              </label>
+                              <input
+                                type="text"
+                                value={draft.customNama}
+                                onChange={e =>
+                                  updateDraftForRequest(req, { customNama: e.target.value })
+                                }
+                                className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg text-xs bg-white"
+                              />
+                            </div>
+                          </>
+                        ) : (
+                          <>
+                            <div>
+                              <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">
+                                Tautkan ke Guru Terdaftar
+                              </label>
+                              <select
+                                value={draft.teacherId}
+                                onChange={e =>
+                                  updateDraftForRequest(req, { teacherId: e.target.value })
+                                }
+                                className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg text-xs font-semibold bg-white"
+                              >
+                                <option value="">+ Buat Guru Baru</option>
+                                {matchingTeachers.map(t => (
+                                  <option key={t.id} value={t.id}>
+                                    {t.nama} ({t.role === 'guru_tahfidz' ? t.kelompokTahfidz || t.kelompokBTQ : t.kelompokBTQ})
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+
+                            {!draft.teacherId && (
+                              <div>
+                                <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">
+                                  Kelompok / Halaqah Baru
+                                </label>
+                                <input
+                                  type="text"
+                                  value={draft.customGroup}
+                                  onChange={e =>
+                                    updateDraftForRequest(req, { customGroup: e.target.value })
+                                  }
+                                  placeholder="Contoh: TILAWATI 4 PI"
+                                  className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg text-xs bg-white"
+                                />
+                              </div>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+          )}
+
+          {/* Wali Kelas Google Binding Section */}
+          <section className="bg-white border border-slate-200 rounded-2xl p-4 shadow-2xs space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl bg-purple-100 text-purple-800 flex items-center justify-center shrink-0">
+                  <Mail className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-xs font-extrabold text-slate-900">
+                    Tautkan Email Google Wali Kelas (Mode Pantau Read-Only)
+                  </h3>
+                  <p className="text-[11px] text-slate-500">
+                    {waliDirectoryEntries.length > 0
+                      ? `${waliDirectoryEntries.length} Wali Kelas sudah terhubung dengan akun Google.`
+                      : 'Daftarkan Gmail Wali Kelas agar bisa memantau report dan absensi kelasnya secara online.'}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowWaliBinding(prev => !prev)}
+                className="px-3 py-1.5 text-xs font-bold text-purple-800 bg-purple-50 hover:bg-purple-100 border border-purple-200 rounded-xl shrink-0"
+              >
+                {showWaliBinding ? 'Tutup Form Wali Kelas' : '+ Atur Email Google Wali Kelas'}
+              </button>
+            </div>
+
+            {waliDirectoryEntries.length > 0 && (
+              <div className="flex flex-wrap gap-2 pt-1">
+                {waliDirectoryEntries.map(w => (
+                  <span
+                    key={w.id}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-purple-50/70 border border-purple-200 rounded-lg text-[11px] text-purple-950"
+                  >
+                    <strong className="font-bold">Kls {w.assignedClass}:</strong>
+                    <span>{w.nama}</span>
+                    <code className="text-[10px] text-purple-700 font-mono">({w.email})</code>
+                  </span>
+                ))}
+              </div>
+            )}
+
+            {showWaliBinding && (
+              <form
+                onSubmit={handleSaveWaliGmail}
+                className="grid grid-cols-1 sm:grid-cols-4 gap-2.5 pt-3 border-t border-slate-100 items-end"
+              >
+                <div>
+                  <label className="text-[11px] font-bold text-slate-700 block mb-1">
+                    Kelas Formal:
+                  </label>
+                  <select
+                    value={waliClass}
+                    onChange={e => setWaliClass(e.target.value)}
+                    className="w-full px-2.5 py-2 border border-slate-300 rounded-xl text-xs font-semibold bg-white"
+                  >
+                    {HOMEROOM_CLASSES.map(c => (
+                      <option key={c} value={c}>
+                        Kelas {c}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-[11px] font-bold text-slate-700 block mb-1">
+                    Nama Wali Kelas:
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={waliNama}
+                    onChange={e => setWaliNama(e.target.value)}
+                    placeholder="Contoh: Ustadz Ahmad, S.Pd"
+                    className="w-full px-2.5 py-2 border border-slate-300 rounded-xl text-xs bg-white"
+                  />
+                </div>
+                <div>
+                  <label className="text-[11px] font-bold text-slate-700 block mb-1">
+                    Email Google (Gmail):
+                  </label>
+                  <input
+                    type="email"
+                    required
+                    value={waliEmail}
+                    onChange={e => setWaliEmail(e.target.value)}
+                    placeholder="walikelas@gmail.com"
+                    className="w-full px-2.5 py-2 border border-slate-300 rounded-xl text-xs font-mono bg-white"
+                  />
+                </div>
+                <button
+                  type="submit"
+                  disabled={isSavingWali}
+                  className="py-2 px-3 bg-purple-700 hover:bg-purple-800 disabled:bg-slate-400 text-white font-bold rounded-xl text-xs shadow-2xs"
+                >
+                  {isSavingWali ? 'Menyimpan...' : 'Simpan & Tautkan'}
+                </button>
+              </form>
+            )}
+          </section>
+        </div>
+      )}
 
       {/* Newly Reset/Created Credential Banner (One-time copy helper) */}
       {lastIssuedCreds && (

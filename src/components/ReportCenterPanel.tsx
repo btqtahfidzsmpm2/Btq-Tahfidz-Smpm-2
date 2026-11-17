@@ -10,6 +10,7 @@ import {
   RaporSettings
 } from '../types';
 import { storage } from '../services/storage';
+import { cloudDb } from '../services/cloudDb';
 import { downloadRaporPdf, downloadClassSummaryPdf } from '../services/raporPdf';
 import { RaporPrintableSheet, ClassSummaryPrintableSheet } from './RaporPrintableSheet';
 import { detectBtqClassGender, isValidBtqClass } from '../utils/access';
@@ -38,6 +39,9 @@ interface ReportCenterPanelProps {
   bacaanList: BacaanRecord[];
   tahfidzList: TahfidzRecord[];
   absensiList: AbsensiRecord[];
+  cloudSettings?: RaporSettings;
+  cloudPrintStatuses?: Record<string, RaporPrintStatus>;
+  cloudPrintLogs?: RaporPrintBatchLog[];
   preselectedStudentNisn?: string | null;
   onClearPreselected?: () => void;
   onNotify: (type: 'success' | 'error' | 'info', title: string, desc?: string) => void;
@@ -54,6 +58,9 @@ export const ReportCenterPanel: React.FC<ReportCenterPanelProps> = ({
   bacaanList,
   tahfidzList,
   absensiList,
+  cloudSettings,
+  cloudPrintStatuses,
+  cloudPrintLogs,
   preselectedStudentNisn,
   onClearPreselected,
   onNotify
@@ -74,14 +81,27 @@ export const ReportCenterPanel: React.FC<ReportCenterPanelProps> = ({
   const [rekapSearch, setRekapSearch] = useState<string>('');
 
   // Settings & Print Tracking
-  const [settings, setSettings] = useState<RaporSettings>(() => storage.getRaporSettings());
+  const [settings, setSettings] = useState<RaporSettings>(() => cloudSettings || storage.getRaporSettings());
   const [showSettingsEditor, setShowSettingsEditor] = useState(false);
   const [printStatuses, setPrintStatuses] = useState<Record<string, RaporPrintStatus>>(() =>
-    storage.getRaporPrintStatuses()
+    cloudPrintStatuses || storage.getRaporPrintStatuses()
   );
   const [printLogs, setPrintLogs] = useState<RaporPrintBatchLog[]>(() =>
-    storage.getRaporPrintLogs()
+    cloudPrintLogs || storage.getRaporPrintLogs()
   );
+
+  // Sync live cloud updates into ReportCenterPanel state
+  useEffect(() => {
+    if (cloudSettings) setSettings(cloudSettings);
+  }, [cloudSettings]);
+
+  useEffect(() => {
+    if (cloudPrintStatuses) setPrintStatuses(cloudPrintStatuses);
+  }, [cloudPrintStatuses]);
+
+  useEffect(() => {
+    if (cloudPrintLogs) setPrintLogs(cloudPrintLogs);
+  }, [cloudPrintLogs]);
 
   // Preview & Print Payload
   const [previewStudent, setPreviewStudent] = useState<Student | null>(null);
@@ -273,8 +293,32 @@ export const ReportCenterPanel: React.FC<ReportCenterPanelProps> = ({
   const handleSaveSettings = (e: React.FormEvent) => {
     e.preventDefault();
     storage.saveRaporSettings(settings);
+    if (cloudDb.isCloudAuthenticated()) {
+      cloudDb.saveRaporSettingsCloud(settings).catch(err => {
+        onNotify('error', 'Gagal Sinkron Cloud', err?.message || 'Periksa izin Firestore.');
+      });
+    }
     setShowSettingsEditor(false);
     onNotify('success', 'Pengaturan Rapor Disimpan', 'Kop surat dan tanda tangan rapor diperbarui.');
+  };
+
+  const syncPrintBatch = (params: {
+    students: Student[];
+    printedBy: string;
+    kelasLabel: string;
+    jenisCetak: RaporPrintBatchLog['jenisCetak'];
+  }) => {
+    const res = storage.recordRaporPrintBatch({
+      ...params,
+      semester: settings.semester,
+      tahunAjaran: settings.tahunAjaran
+    });
+    refreshPrintState();
+    if (cloudDb.isCloudAuthenticated()) {
+      cloudDb.recordRaporPrintBatchCloud(res.updatedStatuses, res.newLog).catch(() => {
+        // Non-blocking background log sync
+      });
+    }
   };
 
   const triggerRaporPrint = (targetStudents: Student[], labelOverride?: string) => {
@@ -289,15 +333,12 @@ export const ReportCenterPanel: React.FC<ReportCenterPanelProps> = ({
       labelOverride ||
       (selectedClass === 'ALL' ? 'Lintas Kelas' : `Kelas ${selectedClass}`);
 
-    storage.recordRaporPrintBatch({
+    syncPrintBatch({
       students: targetStudents,
       printedBy: user.nama,
       kelasLabel,
-      jenisCetak,
-      semester: settings.semester,
-      tahunAjaran: settings.tahunAjaran
+      jenisCetak
     });
-    refreshPrintState();
 
     setPrintPayload({ mode: 'rapor', students: targetStudents });
     onNotify(
@@ -336,16 +377,13 @@ export const ReportCenterPanel: React.FC<ReportCenterPanelProps> = ({
         fileLabel: kelasLabel
       });
 
-      storage.recordRaporPrintBatch({
+      syncPrintBatch({
         students: targetStudents,
         printedBy: user.nama,
         kelasLabel: labelOverride || (selectedClass === 'ALL' ? 'Lintas Kelas' : `Kelas ${selectedClass}`),
         jenisCetak:
-          targetStudents.length === 1 ? 'Download Rapor PDF (Satuan)' : 'Download Rapor PDF (Massal)',
-        semester: settings.semester,
-        tahunAjaran: settings.tahunAjaran
+          targetStudents.length === 1 ? 'Download Rapor PDF (Satuan)' : 'Download Rapor PDF (Massal)'
       });
-      refreshPrintState();
 
       onNotify(
         'success',
@@ -374,15 +412,12 @@ export const ReportCenterPanel: React.FC<ReportCenterPanelProps> = ({
         settings
       });
 
-      storage.recordRaporPrintBatch({
+      syncPrintBatch({
         students: targetStudents,
         printedBy: user.nama,
         kelasLabel,
-        jenisCetak: 'Download Rekap Nilai (PDF)',
-        semester: settings.semester,
-        tahunAjaran: settings.tahunAjaran
+        jenisCetak: 'Download Rekap Nilai (PDF)'
       });
-      refreshPrintState();
 
       onNotify('success', 'Rekap Nilai PDF Diunduh', `File "${fileName}" berhasil diunduh.`);
     } catch {
@@ -398,15 +433,12 @@ export const ReportCenterPanel: React.FC<ReportCenterPanelProps> = ({
       return;
     }
 
-    storage.recordRaporPrintBatch({
+    syncPrintBatch({
       students: targetStudents,
       printedBy: user.nama,
       kelasLabel,
-      jenisCetak: 'Rekapitulasi Nilai Kelas',
-      semester: settings.semester,
-      tahunAjaran: settings.tahunAjaran
+      jenisCetak: 'Rekapitulasi Nilai Kelas'
     });
-    refreshPrintState();
 
     setPrintPayload({ mode: 'rekap_kelas', kelasLabel, students: targetStudents });
     setTimeout(() => {
@@ -1073,6 +1105,9 @@ export const ReportCenterPanel: React.FC<ReportCenterPanelProps> = ({
                     onClick={() => {
                       storage.resetAllRaporStatuses();
                       refreshPrintState();
+                      if (cloudDb.isCloudAuthenticated()) {
+                        cloudDb.resetAllRaporStatusesCloud().catch(() => {});
+                      }
                       onNotify('info', 'Status Cetak Direset', 'Semua status cetak rapor diatur ulang menjadi Belum Dicetak.');
                     }}
                     className="px-3 py-1.5 text-xs font-bold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-xl flex items-center gap-1.5"
@@ -1336,6 +1371,9 @@ export const ReportCenterPanel: React.FC<ReportCenterPanelProps> = ({
                                     onClick={() => {
                                       storage.resetStudentRaporStatus(s.nisn);
                                       refreshPrintState();
+                                      if (cloudDb.isCloudAuthenticated()) {
+                                        cloudDb.resetStudentRaporStatusCloud(s.nisn).catch(() => {});
+                                      }
                                     }}
                                     className="p-1 text-slate-400 hover:text-rose-700 rounded"
                                     title="Reset status cetak siswa ini"

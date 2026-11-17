@@ -3,7 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import { onAuthStateChanged } from 'firebase/auth';
 import {
   Student,
   UserSession,
@@ -12,10 +13,16 @@ import {
   AbsensiRecord,
   Teacher,
   UserAccount,
-  AuthLogEntry
+  AuthLogEntry,
+  AccessRequest,
+  RaporSettings,
+  RaporPrintStatus,
+  RaporPrintBatchLog
 } from './types';
 import { storage } from './services/storage';
 import { authService } from './services/auth';
+import { auth, testConnection } from './services/firebase';
+import { cloudDb, StaffDirectoryRecord } from './services/cloudDb';
 import {
   getAuthorizedStudents,
   getAuthorizedNgajiStudents,
@@ -51,8 +58,41 @@ export default function App() {
   const [tahfidzList, setTahfidzList] = useState<TahfidzRecord[]>([]);
   const [absensiList, setAbsensiList] = useState<AbsensiRecord[]>([]);
 
+  // Cloud Real-Time States
+  const [staffDirectory, setStaffDirectory] = useState<StaffDirectoryRecord[]>([]);
+  const [accessRequests, setAccessRequests] = useState<AccessRequest[]>([]);
+  const [cloudConnected, setCloudConnected] = useState(false);
+  const [raporSettings, setRaporSettings] = useState<RaporSettings>(() => storage.getRaporSettings());
+  const [raporPrintStatuses, setRaporPrintStatuses] = useState<Record<string, RaporPrintStatus>>(() =>
+    storage.getRaporPrintStatuses()
+  );
+  const [raporPrintLogs, setRaporPrintLogs] = useState<RaporPrintBatchLog[]>(() =>
+    storage.getRaporPrintLogs()
+  );
+  const [hasLocalDataToPush, setHasLocalDataToPush] = useState(false);
+  const [isPushingToCloud, setIsPushingToCloud] = useState(false);
+
+  const cloudUnsubRef = useRef<(() => void) | null>(null);
+  const activeCloudUidRef = useRef<string | null>(null);
+  const cloudCountsRef = useRef<{ students: number; teachers: number }>({
+    students: -1,
+    teachers: -1
+  });
+  const localSnapshotForPushRef = useRef<{
+    students: Student[];
+    teachers: Teacher[];
+    bacaanList: BacaanRecord[];
+    tahfidzList: TahfidzRecord[];
+    absensiList: AbsensiRecord[];
+    settings: RaporSettings;
+  } | null>(null);
+
   // Selected Student for Public View
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
+  const selectedStudentRef = useRef<Student | null>(null);
+  useEffect(() => {
+    selectedStudentRef.current = selectedStudent;
+  }, [selectedStudent]);
 
   // Active student for modals
   const [modalTargetStudent, setModalTargetStudent] = useState<Student | undefined>(undefined);
@@ -115,13 +155,156 @@ export default function App() {
     refreshAccounts();
 
     // Sync selected student if any
-    if (selectedStudent) {
-      const refreshed = stds.find(s => s.nisn === selectedStudent.nisn);
+    if (selectedStudentRef.current) {
+      const refreshed = stds.find(s => s.nisn === selectedStudentRef.current?.nisn);
       if (refreshed) setSelectedStudent(refreshed);
     }
   };
 
+  const stopCloudSubscription = () => {
+    if (cloudUnsubRef.current) {
+      cloudUnsubRef.current();
+      cloudUnsubRef.current = null;
+    }
+    activeCloudUidRef.current = null;
+    cloudCountsRef.current = { students: -1, teachers: -1 };
+  };
+
+  const startCloudSubscription = (session: UserSession) => {
+    if (session.authProvider !== 'google') return;
+    const targetUid = session.authUid || session.accountId;
+    if (activeCloudUidRef.current === targetUid && cloudUnsubRef.current) {
+      return;
+    }
+
+    stopCloudSubscription();
+    activeCloudUidRef.current = targetUid;
+    cloudCountsRef.current = { students: -1, teachers: -1 };
+
+    if (session.role === 'admin') {
+      const localStds = storage.getStudents();
+      const localTchs = storage.getTeachers();
+      if (localStds.length > 0 || localTchs.length > 0) {
+        localSnapshotForPushRef.current = {
+          students: localStds,
+          teachers: localTchs,
+          bacaanList: storage.getBacaan(),
+          tahfidzList: storage.getTahfidz(),
+          absensiList: storage.getAbsensi(),
+          settings: storage.getRaporSettings()
+        };
+      } else {
+        localSnapshotForPushRef.current = null;
+        setHasLocalDataToPush(false);
+      }
+    }
+
+    cloudUnsubRef.current = cloudDb.subscribeCloudData(session, {
+      onStudents: list => {
+        cloudCountsRef.current.students = list.length;
+        const cloudHasData =
+          cloudCountsRef.current.students > 0 || cloudCountsRef.current.teachers > 0;
+
+        if (!cloudHasData && session.role === 'admin' && localSnapshotForPushRef.current) {
+          setHasLocalDataToPush(true);
+          return;
+        }
+
+        if (cloudHasData) {
+          localSnapshotForPushRef.current = null;
+          setHasLocalDataToPush(false);
+        }
+
+        storage.saveStudents(list);
+        setStudents(list);
+        if (selectedStudentRef.current) {
+          const refreshed = list.find(s => s.nisn === selectedStudentRef.current?.nisn);
+          if (refreshed) setSelectedStudent(refreshed);
+        }
+      },
+      onTeachers: async list => {
+        cloudCountsRef.current.teachers = list.length;
+        const cloudHasData =
+          cloudCountsRef.current.students > 0 || cloudCountsRef.current.teachers > 0;
+
+        if (!cloudHasData && session.role === 'admin' && localSnapshotForPushRef.current) {
+          setHasLocalDataToPush(true);
+          return;
+        }
+
+        if (cloudHasData) {
+          localSnapshotForPushRef.current = null;
+          setHasLocalDataToPush(false);
+        }
+
+        storage.saveTeachers(list);
+        setTeachers(list);
+        await authService.syncAccounts(list);
+        refreshAccounts();
+      },
+      onStaffDirectory: items => {
+        setStaffDirectory(items);
+      },
+      onBacaan: list => {
+        if (
+          list.length === 0 &&
+          cloudCountsRef.current.students <= 0 &&
+          cloudCountsRef.current.teachers <= 0 &&
+          localSnapshotForPushRef.current
+        ) {
+          return;
+        }
+        storage.saveBacaan(list);
+        setBacaanList(list);
+      },
+      onTahfidz: list => {
+        if (
+          list.length === 0 &&
+          cloudCountsRef.current.students <= 0 &&
+          cloudCountsRef.current.teachers <= 0 &&
+          localSnapshotForPushRef.current
+        ) {
+          return;
+        }
+        storage.saveTahfidz(list);
+        setTahfidzList(list);
+      },
+      onAbsensi: list => {
+        if (
+          list.length === 0 &&
+          cloudCountsRef.current.students <= 0 &&
+          cloudCountsRef.current.teachers <= 0 &&
+          localSnapshotForPushRef.current
+        ) {
+          return;
+        }
+        storage.saveAbsensi(list);
+        setAbsensiList(list);
+      },
+      onRaporSettings: settings => {
+        storage.saveRaporSettings(settings);
+        setRaporSettings(settings);
+      },
+      onRaporStatuses: statuses => {
+        storage.saveRaporPrintStatuses(statuses);
+        setRaporPrintStatuses(statuses);
+      },
+      onRaporLogs: logs => {
+        storage.saveRaporPrintLogs(logs);
+        setRaporPrintLogs(logs);
+      },
+      onAccessRequests: reqs => {
+        setAccessRequests(reqs);
+      },
+      onSyncError: message => {
+        addToast('error', 'Kendala Sinkronisasi Cloud', message);
+      }
+    });
+  };
+
   useEffect(() => {
+    let isMounted = true;
+
     const init = async () => {
       // 0. Clean slate wipe requested by user so portal starts 100% empty for fresh BTQ & Tahfidz imports
       const wasWiped = storage.ensurePortalCleanedOnce();
@@ -138,21 +321,99 @@ export default function App() {
       storage.syncTeachersFromStudents(false);
       await reloadData();
 
-      // 4. Restore active validated session if available
+      // 4. Restore active local session if available (Google Auth state listener below takes precedence if signed in via Google)
       const savedSession = authService.getSavedSession();
-      if (savedSession) {
+      if (savedSession && !auth.currentUser) {
         setUser(savedSession);
-      } else if (wasWiped) {
+      } else if (wasWiped && !auth.currentUser) {
         setUser(null);
         setCurrentView('public');
       }
+
+      // 5. Verify Cloud Firestore connectivity
+      const connStatus = await testConnection();
+      if (isMounted) {
+        setCloudConnected(connStatus === 'connected');
+      }
     };
     init();
+
+    const unsubAuth = onAuthStateChanged(auth, async fbUser => {
+      if (!isMounted) return;
+      if (fbUser && fbUser.emailVerified) {
+        try {
+          const resolved = await cloudDb.resolveGoogleUserSession(fbUser);
+          if (!isMounted) return;
+          if (resolved.status === 'authorized' && resolved.session) {
+            setUser(resolved.session);
+            setCloudConnected(true);
+            startCloudSubscription(resolved.session);
+          }
+        } catch (err) {
+          console.error('Auth resolution error:', err);
+        }
+      } else {
+        if (activeCloudUidRef.current) {
+          stopCloudSubscription();
+          const localSaved = authService.getSavedSession();
+          setUser(localSaved);
+          if (!localSaved) {
+            setCurrentView('public');
+          }
+        }
+      }
+    });
+
+    return () => {
+      isMounted = false;
+      unsubAuth();
+      stopCloudSubscription();
+    };
   }, []);
 
-  const handleSyncTeachers = () => {
+  const handlePushLocalToCloud = async () => {
+    const snap = localSnapshotForPushRef.current;
+    if (!snap || isPushingToCloud || !cloudDb.isCloudAuthenticated()) return;
+
+    setIsPushingToCloud(true);
+    try {
+      await cloudDb.pushLocalDatasetToCloud(snap);
+      localSnapshotForPushRef.current = null;
+      setHasLocalDataToPush(false);
+      addToast(
+        'success',
+        'Upload ke Cloud Berhasil',
+        `${snap.students.length} data siswa & ${snap.teachers.length} guru kini tersimpan online real-time.`
+      );
+    } catch (err: any) {
+      addToast('error', 'Gagal Upload ke Cloud', err?.message || 'Periksa koneksi internet Anda.');
+    } finally {
+      setIsPushingToCloud(false);
+    }
+  };
+
+  const handleSyncTeachers = async () => {
     const res = storage.syncTeachersFromStudents(true);
-    reloadData();
+    await reloadData();
+    if (cloudDb.isCloudAuthenticated()) {
+      try {
+        const dirItems: StaffDirectoryRecord[] = res.teachers.map(t => ({
+          id: t.id,
+          nama: t.nama,
+          role: t.role,
+          kelompokBTQ: t.kelompokBTQ || '-',
+          kelompokTahfidz: t.kelompokTahfidz,
+          ruangan: t.ruangan || '-',
+          kontak: t.kontak,
+          email: t.email
+        }));
+        await cloudDb.saveStaffDirectoryBatch(dirItems);
+        const waliItems = staffDirectory.filter(d => d.role === 'wali_kelas');
+        await cloudDb.recomputeAllPermissionsCloud(storage.getStudents(), [...dirItems, ...waliItems]);
+      } catch (err) {
+        console.error(err);
+      }
+    }
     addToast(
       'success',
       'Guru Berhasil Disinkronkan',
@@ -160,9 +421,16 @@ export default function App() {
     );
   };
 
-  const handleDeduplicateStudents = () => {
+  const handleDeduplicateStudents = async () => {
     const res = storage.deduplicateStudentsByName();
-    reloadData();
+    await reloadData();
+    if (res.removedCount > 0 && cloudDb.isCloudAuthenticated()) {
+      try {
+        await cloudDb.syncStudentsBatch(storage.getStudents(), staffDirectory, false);
+      } catch (err) {
+        console.error(err);
+      }
+    }
     if (res.removedCount > 0) {
       addToast(
         'success',
@@ -182,6 +450,10 @@ export default function App() {
     setUser(session);
     setCurrentView('dashboard');
     refreshAccounts();
+    if (session.authProvider === 'google') {
+      setCloudConnected(true);
+      startCloudSubscription(session);
+    }
     addToast(
       'success',
       'Login Berhasil',
@@ -189,9 +461,19 @@ export default function App() {
     );
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    if (user?.authProvider === 'google') {
+      stopCloudSubscription();
+      try {
+        await cloudDb.signOutGoogle();
+      } catch {
+        // ignore
+      }
+    }
     authService.logout();
     setUser(null);
+    setHasLocalDataToPush(false);
+    localSnapshotForPushRef.current = null;
     setCurrentView('public');
     addToast('info', 'Telah Keluar', 'Anda telah keluar dari portal pengajar.');
   };
@@ -247,13 +529,22 @@ export default function App() {
   };
 
   // Execute Confirmed Delete in Real Time
-  const handleConfirmDelete = () => {
+  const handleConfirmDelete = async () => {
     if (!deleteTarget) return;
 
     if (deleteTarget.type === 'Semua Data') {
+      localSnapshotForPushRef.current = null;
+      setHasLocalDataToPush(false);
       storage.clearAllData();
       authService.purgeTeacherAccounts();
       setSelectedStudent(null);
+      if (cloudDb.isCloudAuthenticated()) {
+        try {
+          await cloudDb.clearAllCloudData();
+        } catch (err: any) {
+          addToast('error', 'Kendala Hapus Cloud', err?.message || 'Gagal mengosongkan Firestore.');
+        }
+      }
       addToast(
         'success',
         'Semua Data Dikosongkan',
@@ -261,6 +552,13 @@ export default function App() {
       );
     } else if (deleteTarget.type === 'Siswa') {
       storage.deleteStudent(deleteTarget.idOrNisn);
+      if (cloudDb.isCloudAuthenticated()) {
+        try {
+          await cloudDb.deleteStudentCloud(deleteTarget.idOrNisn);
+        } catch (err: any) {
+          addToast('error', 'Kendala Hapus Cloud', err?.message || 'Gagal menghapus siswa di Firestore.');
+        }
+      }
       addToast(
         'success',
         'Data Siswa Berhasil Dihapus',
@@ -268,6 +566,15 @@ export default function App() {
       );
     } else if (deleteTarget.type === 'Guru Pengajar') {
       storage.deleteTeacher(deleteTarget.idOrNisn);
+      if (cloudDb.isCloudAuthenticated()) {
+        try {
+          await cloudDb.deleteStaffDirectoryDoc(deleteTarget.idOrNisn);
+          const nextDir = staffDirectory.filter(d => d.id !== deleteTarget.idOrNisn);
+          await cloudDb.recomputeAllPermissionsCloud(storage.getStudents(), nextDir);
+        } catch (err: any) {
+          addToast('error', 'Kendala Hapus Cloud', err?.message || 'Gagal menghapus guru di Firestore.');
+        }
+      }
       addToast(
         'success',
         'Guru Pengajar Berhasil Dihapus',
@@ -275,7 +582,7 @@ export default function App() {
       );
     }
 
-    reloadData();
+    await reloadData();
     setDeleteTarget(null);
   };
 
@@ -287,6 +594,7 @@ export default function App() {
         currentView={currentView}
         onNavigate={view => setCurrentView(view)}
         user={user}
+        cloudConnected={cloudConnected}
         onOpenLogin={() => setShowLoginModal(true)}
         onOpenChangePassword={() => setShowChangePasswordModal(true)}
         onLogout={handleLogout}
@@ -314,6 +622,15 @@ export default function App() {
             absensiList={absensiList}
             accounts={accounts}
             authLogs={authLogs}
+            staffDirectory={staffDirectory}
+            accessRequests={accessRequests}
+            cloudConnected={cloudConnected}
+            raporSettings={raporSettings}
+            raporPrintStatuses={raporPrintStatuses}
+            raporPrintLogs={raporPrintLogs}
+            hasLocalDataToPush={hasLocalDataToPush}
+            isPushingToCloud={isPushingToCloud}
+            onPushLocalToCloud={handlePushLocalToCloud}
             onRefreshAccounts={refreshAccounts}
             onOpenChangePasswordModal={() => setShowChangePasswordModal(true)}
             onOpenBacaanModal={student => {

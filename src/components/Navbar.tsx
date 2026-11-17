@@ -1,11 +1,12 @@
 import React from 'react';
 import { UserSession } from '../types';
-import { LogIn, LogOut, KeyRound } from 'lucide-react';
+import { LogIn, LogOut, KeyRound, Cloud } from 'lucide-react';
 
 interface NavbarProps {
   currentView: 'public' | 'dashboard';
   onNavigate: (view: 'public' | 'dashboard') => void;
   user: UserSession | null;
+  cloudConnected?: boolean;
   onOpenLogin: () => void;
   onOpenChangePassword: () => void;
   onLogout: () => void;
@@ -15,6 +16,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   currentView,
   onNavigate,
   user,
+  cloudConnected = false,
   onOpenLogin,
   onOpenChangePassword,
   onLogout
@@ -72,8 +74,17 @@ export const Navbar: React.FC<NavbarProps> = ({
 
           <span className="text-emerald-300/40" aria-hidden="true">·</span>
 
-          <span className="text-emerald-200/80 whitespace-nowrap shrink-0 text-[11px] font-normal">
-            TP 2026/2027
+          <span className="text-emerald-200/80 whitespace-nowrap shrink-0 text-[11px] font-normal flex items-center gap-1.5">
+            <span>TP 2026/2027</span>
+            {cloudConnected && (
+              <>
+                <span aria-hidden="true">·</span>
+                <span className="inline-flex items-center gap-1 text-emerald-200 font-semibold">
+                  <Cloud className="w-3 h-3 text-amber-300" />
+                  <span>Cloud Real-Time</span>
+                </span>
+              </>
+            )}
           </span>
         </nav>
 
@@ -90,11 +101,13 @@ export const Navbar: React.FC<NavbarProps> = ({
           ) : (
             <div className="flex items-center gap-2">
               <div className="text-right hidden sm:block mr-1">
-                <p className="text-xs font-bold text-white truncate max-w-[160px] leading-tight">
+                <p className="text-xs font-bold text-white truncate max-w-[180px] leading-tight">
                   {user.nama}
                 </p>
-                <p className="text-[10px] text-amber-300 font-medium tracking-wide">
-                  <span className="font-mono lowercase">@{user.username}</span>
+                <p className="text-[10px] text-amber-300 font-medium tracking-wide truncate max-w-[240px]">
+                  <span className="font-mono lowercase">
+                    {user.email ? user.email : `@${user.username}`}
+                  </span>
                   {' · '}
                   <span className="uppercase">
                     {user.role.replace(/_/g, ' ')}
@@ -103,14 +116,16 @@ export const Navbar: React.FC<NavbarProps> = ({
                 </p>
               </div>
 
-              <button
-                onClick={onOpenChangePassword}
-                className="px-2.5 py-1.5 text-xs font-semibold text-emerald-100 bg-emerald-900/70 hover:bg-emerald-900 border border-emerald-700/60 rounded-lg transition-colors whitespace-nowrap shrink-0 flex items-center gap-1"
-                title="Ubah Password Akun"
-              >
-                <KeyRound className="w-3.5 h-3.5 text-amber-300" />
-                <span className="hidden lg:inline">Password</span>
-              </button>
+              {user.authProvider !== 'google' && (
+                <button
+                  onClick={onOpenChangePassword}
+                  className="px-2.5 py-1.5 text-xs font-semibold text-emerald-100 bg-emerald-900/70 hover:bg-emerald-900 border border-emerald-700/60 rounded-lg transition-colors whitespace-nowrap shrink-0 flex items-center gap-1"
+                  title="Ubah Password Akun"
+                >
+                  <KeyRound className="w-3.5 h-3.5 text-amber-300" />
+                  <span className="hidden lg:inline">Password</span>
+                </button>
+              )}
 
               <button
                 onClick={onLogout}

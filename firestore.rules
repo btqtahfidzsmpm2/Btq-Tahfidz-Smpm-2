@@ -1,0 +1,558 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 1. Global Safety Net (Default-Deny)
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // 2. Reusable Hardened Global Primitives
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() &&
+        request.auth.token.email_verified == true &&
+        request.auth.token.email is string;
+    }
+
+    function isBootstrapAdmin() {
+      return isVerifiedUser() &&
+        request.auth.token.email == 'btqtahfidzsmpm2@gmail.com';
+    }
+
+    function isAdmin() {
+      return isBootstrapAdmin() ||
+        (isVerifiedUser() && exists(/databases/$(database)/documents/admins/$(request.auth.uid)));
+    }
+
+    function isBoundedEmailList(arr, maxLen) {
+      return arr is list &&
+        arr.size() >= 1 &&
+        arr.size() <= maxLen &&
+        arr[0] is string &&
+        arr[0].size() <= 150;
+    }
+
+    function isOptionalString(data, key, maxLen) {
+      return !(key in data) || (data[key] is string && data[key].size() <= maxLen);
+    }
+
+    // 3. Entity Validation Blueprints
+    function isValidAdminDoc(data) {
+      return data.keys().hasAll(['uid', 'email', 'nama', 'createdAt']) &&
+        data.keys().hasOnly(['uid', 'email', 'nama', 'createdAt']) &&
+        isValidId(data.uid) &&
+        data.email is string && data.email.size() >= 3 && data.email.size() <= 150 &&
+        data.nama is string && data.nama.size() >= 1 && data.nama.size() <= 120 &&
+        data.createdAt is timestamp;
+    }
+
+    function isValidStaffUser(data) {
+      return data.keys().hasAll(['uid', 'email', 'nama', 'role', 'isActive', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['uid', 'email', 'nama', 'role', 'teacherId', 'assignedGroup', 'assignedTahfidzGroup', 'assignedClass', 'isActive', 'createdAt', 'updatedAt']) &&
+        isValidId(data.uid) &&
+        data.email is string && data.email.size() >= 3 && data.email.size() <= 150 &&
+        data.nama is string && data.nama.size() >= 1 && data.nama.size() <= 120 &&
+        data.role in ['admin', 'guru_ngaji', 'guru_tahfidz', 'wali_kelas'] &&
+        isOptionalString(data, 'teacherId', 128) &&
+        isOptionalString(data, 'assignedGroup', 200) &&
+        isOptionalString(data, 'assignedTahfidzGroup', 200) &&
+        isOptionalString(data, 'assignedClass', 30) &&
+        data.isActive is bool &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidStaffDirectoryItem(data) {
+      return data.keys().hasAll(['id', 'nama', 'role', 'kelompokBTQ', 'ruangan', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'nama', 'role', 'kelompokBTQ', 'kelompokTahfidz', 'assignedClass', 'ruangan', 'kontak', 'email', 'createdAt', 'updatedAt']) &&
+        isValidId(data.id) &&
+        data.nama is string && data.nama.size() >= 1 && data.nama.size() <= 120 &&
+        data.role in ['guru_ngaji', 'guru_tahfidz', 'wali_kelas'] &&
+        data.kelompokBTQ is string && data.kelompokBTQ.size() <= 200 &&
+        isOptionalString(data, 'kelompokTahfidz', 200) &&
+        isOptionalString(data, 'assignedClass', 30) &&
+        data.ruangan is string && data.ruangan.size() <= 100 &&
+        isOptionalString(data, 'kontak', 40) &&
+        isOptionalString(data, 'email', 150) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidAccessRequest(data) {
+      return data.keys().hasAll(['uid', 'email', 'nama', 'requestedRole', 'requestedNote', 'status', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['uid', 'email', 'nama', 'requestedRole', 'requestedNote', 'status', 'createdAt', 'updatedAt']) &&
+        isValidId(data.uid) &&
+        data.email is string && data.email.size() >= 3 && data.email.size() <= 150 &&
+        data.nama is string && data.nama.size() >= 1 && data.nama.size() <= 120 &&
+        data.requestedRole in ['guru_ngaji', 'guru_tahfidz', 'wali_kelas'] &&
+        data.requestedNote is string && data.requestedNote.size() <= 200 &&
+        data.status in ['pending', 'approved', 'rejected'] &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidCapaianMap(c) {
+      return c is map &&
+        c.keys().hasAll(['tingkat', 'halamanAyat', 'tanggal', 'nilai']) &&
+        c.keys().hasOnly(['tingkat', 'halamanAyat', 'tanggal', 'nilai']) &&
+        c.tingkat is string && c.tingkat.size() <= 120 &&
+        c.halamanAyat is string && c.halamanAyat.size() <= 120 &&
+        c.tanggal is string && c.tanggal.size() <= 30 &&
+        c.nilai in ['A', 'B', 'C'];
+    }
+
+    function isValidUjianMap(u) {
+      return u is map &&
+        u.keys().hasAll(['nilai', 'predikat', 'natijah']) &&
+        u.keys().hasOnly(['tanggal', 'jenis', 'nilai', 'predikat', 'natijah', 'kelulusan', 'keterangan']) &&
+        isOptionalString(u, 'tanggal', 30) &&
+        isOptionalString(u, 'jenis', 120) &&
+        u.nilai is number && u.nilai >= 0 && u.nilai <= 100 &&
+        u.predikat in ['MUMTAZ', 'JAYYID', 'MAQBUL', 'ROSHIB', 'A', 'B', 'C', 'D'] &&
+        u.natijah is string && u.natijah.size() <= 120 &&
+        isOptionalString(u, 'kelulusan', 120) &&
+        isOptionalString(u, 'keterangan', 300);
+    }
+
+    function isValidStudent(data) {
+      return data.keys().hasAll([
+          'id', 'nisn', 'nama', 'gender', 'kelas', 'kelasBTQ', 'pengajar',
+          'ruangan', 'waliKelas', 'isTahfidz', 'capaianTerakhir', 'ujian',
+          'authorizedEmails', 'editorEmails', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'id', 'nisn', 'nama', 'gender', 'kelas', 'kelasBTQ', 'pengajar',
+          'ruangan', 'waliKelas', 'isTahfidz', 'pembimbingTahfidz', 'halaqahTahfidz',
+          'ruanganTahfidz', 'targetJuz', 'totalHafalan', 'hafalanTerakhir',
+          'capaianTerakhir', 'ujian', 'kehadiranPersen',
+          'authorizedEmails', 'editorEmails', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.id) &&
+        isValidId(data.nisn) && data.nisn.size() <= 40 &&
+        data.nama is string && data.nama.size() >= 1 && data.nama.size() <= 150 &&
+        data.gender in ['L', 'P'] &&
+        data.kelas is string && data.kelas.size() <= 30 &&
+        data.kelasBTQ is string && data.kelasBTQ.size() <= 120 &&
+        data.pengajar is string && data.pengajar.size() <= 120 &&
+        data.ruangan is string && data.ruangan.size() <= 100 &&
+        data.waliKelas is string && data.waliKelas.size() <= 120 &&
+        data.isTahfidz is bool &&
+        isOptionalString(data, 'pembimbingTahfidz', 120) &&
+        isOptionalString(data, 'halaqahTahfidz', 120) &&
+        isOptionalString(data, 'ruanganTahfidz', 100) &&
+        isOptionalString(data, 'targetJuz', 80) &&
+        isOptionalString(data, 'totalHafalan', 100) &&
+        isOptionalString(data, 'hafalanTerakhir', 150) &&
+        isValidCapaianMap(data.capaianTerakhir) &&
+        isValidUjianMap(data.ujian) &&
+        (!('kehadiranPersen' in data) || (data.kehadiranPersen is number && data.kehadiranPersen >= 0 && data.kehadiranPersen <= 100)) &&
+        isBoundedEmailList(data.authorizedEmails, 20) &&
+        isBoundedEmailList(data.editorEmails, 15) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidBacaan(data) {
+      return data.keys().hasAll([
+          'id', 'nisn', 'tanggal', 'tipe', 'jilid', 'halaman', 'nilai',
+          'pengajar', 'authorUid', 'authorizedEmails', 'editorEmails', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'id', 'nisn', 'tanggal', 'tipe', 'jilid', 'halaman', 'nilai', 'catatan',
+          'pengajar', 'authorUid', 'authorizedEmails', 'editorEmails', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.id) &&
+        isValidId(data.nisn) && data.nisn.size() <= 40 &&
+        data.tanggal is string && data.tanggal.size() <= 30 &&
+        data.tipe in ['Tilawati Remaja', "Al-Qur'an"] &&
+        data.jilid is string && data.jilid.size() <= 100 &&
+        data.halaman is string && data.halaman.size() <= 100 &&
+        data.nilai in ['A', 'B', 'C'] &&
+        isOptionalString(data, 'catatan', 300) &&
+        data.pengajar is string && data.pengajar.size() <= 120 &&
+        isValidId(data.authorUid) &&
+        isBoundedEmailList(data.authorizedEmails, 20) &&
+        isBoundedEmailList(data.editorEmails, 15) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidTahfidz(data) {
+      return data.keys().hasAll([
+          'id', 'nisn', 'tanggal', 'surat', 'ayat', 'status', 'kelancaran',
+          'guru', 'authorUid', 'authorizedEmails', 'editorEmails', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'id', 'nisn', 'tanggal', 'surat', 'ayat', 'status', 'kelancaran',
+          'guru', 'catatan', 'authorUid', 'authorizedEmails', 'editorEmails', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.id) &&
+        isValidId(data.nisn) && data.nisn.size() <= 40 &&
+        data.tanggal is string && data.tanggal.size() <= 30 &&
+        data.surat is string && data.surat.size() <= 120 &&
+        data.ayat is string && data.ayat.size() <= 100 &&
+        data.status in ['Ziyadah', "Muroja'ah", 'Mutqin'] &&
+        data.kelancaran in ['Sangat Lancar (Mumtaz)', 'Lancar (Jayyid Jiddan)', 'Cukup (Jayyid)'] &&
+        data.guru is string && data.guru.size() <= 120 &&
+        isOptionalString(data, 'catatan', 300) &&
+        isValidId(data.authorUid) &&
+        isBoundedEmailList(data.authorizedEmails, 20) &&
+        isBoundedEmailList(data.editorEmails, 15) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidAbsensi(data) {
+      return data.keys().hasAll([
+          'id', 'nisn', 'tanggal', 'sesi', 'status',
+          'authorUid', 'authorizedEmails', 'editorEmails', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'id', 'nisn', 'tanggal', 'sesi', 'status', 'keterangan',
+          'authorUid', 'authorizedEmails', 'editorEmails', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.id) &&
+        isValidId(data.nisn) && data.nisn.size() <= 40 &&
+        data.tanggal is string && data.tanggal.size() <= 30 &&
+        data.sesi in ['btq', 'tahfidz'] &&
+        data.status in ['Hadir', 'Sakit', 'Izin', 'Alpa'] &&
+        isOptionalString(data, 'keterangan', 200) &&
+        isValidId(data.authorUid) &&
+        isBoundedEmailList(data.authorizedEmails, 20) &&
+        isBoundedEmailList(data.editorEmails, 15) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidRaporSettings(data) {
+      return data.keys().hasAll(['tahunAjaran', 'semester', 'tanggalRapor', 'kepalaSekolah', 'nbmKepala', 'koordinator', 'updatedAt']) &&
+        data.keys().hasOnly(['tahunAjaran', 'semester', 'tanggalRapor', 'kepalaSekolah', 'nbmKepala', 'koordinator', 'updatedAt']) &&
+        data.tahunAjaran is string && data.tahunAjaran.size() <= 40 &&
+        data.semester is string && data.semester.size() <= 30 &&
+        data.tanggalRapor is string && data.tanggalRapor.size() <= 60 &&
+        data.kepalaSekolah is string && data.kepalaSekolah.size() <= 120 &&
+        data.nbmKepala is string && data.nbmKepala.size() <= 60 &&
+        data.koordinator is string && data.koordinator.size() <= 120 &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidRaporStatus(data) {
+      return data.keys().hasAll(['nisn', 'printCount', 'lastPrintedAt', 'lastPrintedBy', 'semester', 'tahunAjaran', 'updatedAt']) &&
+        data.keys().hasOnly(['nisn', 'printCount', 'lastPrintedAt', 'lastPrintedBy', 'semester', 'tahunAjaran', 'updatedAt']) &&
+        isValidId(data.nisn) && data.nisn.size() <= 40 &&
+        data.printCount is number && data.printCount >= 0 &&
+        data.lastPrintedAt is string && data.lastPrintedAt.size() <= 50 &&
+        data.lastPrintedBy is string && data.lastPrintedBy.size() <= 120 &&
+        data.semester is string && data.semester.size() <= 30 &&
+        data.tahunAjaran is string && data.tahunAjaran.size() <= 40 &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidRaporLog(data) {
+      return data.keys().hasAll(['id', 'printedAt', 'printedBy', 'kelasLabel', 'jenisCetak', 'totalRapor', 'semester', 'tahunAjaran', 'nisnList', 'createdAt']) &&
+        data.keys().hasOnly(['id', 'printedAt', 'printedBy', 'kelasLabel', 'jenisCetak', 'totalRapor', 'semester', 'tahunAjaran', 'nisnList', 'createdAt']) &&
+        isValidId(data.id) &&
+        data.printedAt is string && data.printedAt.size() <= 50 &&
+        data.printedBy is string && data.printedBy.size() <= 120 &&
+        data.kelasLabel is string && data.kelasLabel.size() <= 60 &&
+        data.jenisCetak is string && data.jenisCetak.size() <= 80 &&
+        data.totalRapor is number && data.totalRapor >= 0 &&
+        data.semester is string && data.semester.size() <= 30 &&
+        data.tahunAjaran is string && data.tahunAjaran.size() <= 40 &&
+        data.nisnList is list && data.nisnList.size() <= 500 &&
+        (data.nisnList.size() == 0 || (data.nisnList[0] is string && data.nisnList[0].size() <= 40)) &&
+        data.createdAt is timestamp;
+    }
+
+    function isValidPublicReport(data) {
+      return data.keys().hasAll(['nisn', 'nama', 'gender', 'kelas', 'kelasBTQ', 'pengajar', 'ruangan', 'waliKelas', 'isTahfidz', 'capaianTerakhir', 'ujian', 'updatedAt']) &&
+        data.keys().hasOnly(['nisn', 'nama', 'gender', 'kelas', 'kelasBTQ', 'pengajar', 'ruangan', 'waliKelas', 'isTahfidz', 'halaqahTahfidz', 'targetJuz', 'totalHafalan', 'hafalanTerakhir', 'capaianTerakhir', 'ujian', 'kehadiranPersen', 'updatedAt']) &&
+        isValidId(data.nisn) && data.nisn.size() <= 40 &&
+        data.nama is string && data.nama.size() >= 1 && data.nama.size() <= 150 &&
+        data.gender in ['L', 'P'] &&
+        data.kelas is string && data.kelas.size() <= 30 &&
+        data.kelasBTQ is string && data.kelasBTQ.size() <= 120 &&
+        data.pengajar is string && data.pengajar.size() <= 120 &&
+        data.ruangan is string && data.ruangan.size() <= 100 &&
+        data.waliKelas is string && data.waliKelas.size() <= 120 &&
+        data.isTahfidz is bool &&
+        isOptionalString(data, 'halaqahTahfidz', 120) &&
+        isOptionalString(data, 'targetJuz', 80) &&
+        isOptionalString(data, 'totalHafalan', 100) &&
+        isOptionalString(data, 'hafalanTerakhir', 150) &&
+        isValidCapaianMap(data.capaianTerakhir) &&
+        isValidUjianMap(data.ujian) &&
+        (!('kehadiranPersen' in data) || (data.kehadiranPersen is number && data.kehadiranPersen >= 0 && data.kehadiranPersen <= 100)) &&
+        data.updatedAt is timestamp;
+    }
+
+    // 4. Collection Match Blocks
+
+    // Connection healthcheck doc
+    match /test/{docId} {
+      allow get: if docId == 'connection';
+      allow list, write: if false;
+    }
+
+    // Admin UID registry
+    match /admins/{uid} {
+      allow get: if isVerifiedUser() && isValidId(uid) && (request.auth.uid == uid || isAdmin());
+      allow list: if isBootstrapAdmin();
+      allow create: if isBootstrapAdmin() && isValidId(uid) && isValidAdminDoc(incoming()) && incoming().uid == uid && incoming().createdAt == request.time;
+      allow update: if false;
+      allow delete: if isBootstrapAdmin() && isValidId(uid);
+    }
+
+    // Authenticated staff profiles (PII protected: owner or admin only)
+    match /staffUsers/{uid} {
+      allow get: if isVerifiedUser() && isValidId(uid) && (request.auth.uid == uid || isAdmin());
+      allow list: if isVerifiedUser() && (isBootstrapAdmin() || existing().uid == request.auth.uid);
+      allow create: if isAdmin() && isValidId(uid) && isValidStaffUser(incoming()) && incoming().uid == uid && incoming().createdAt == request.time && incoming().updatedAt == request.time;
+      allow update: if isAdmin() && isValidId(uid) && isValidStaffUser(incoming()) && incoming().uid == existing().uid && incoming().createdAt == existing().createdAt && incoming().updatedAt == request.time;
+      allow delete: if isAdmin() && isValidId(uid);
+    }
+
+    // Teacher & homeroom directory (PII protected: matching email or admin)
+    match /staffDirectory/{staffId} {
+      allow get: if isVerifiedUser() && isValidId(staffId) && (isAdmin() || (('email' in existing()) && existing().email == request.auth.token.email));
+      allow list: if isVerifiedUser() && (isBootstrapAdmin() || (('email' in existing()) && existing().email == request.auth.token.email));
+      allow create: if isAdmin() && isValidId(staffId) && isValidStaffDirectoryItem(incoming()) && incoming().id == staffId && incoming().createdAt == request.time && incoming().updatedAt == request.time;
+      allow update: if isAdmin() && isValidId(staffId) && isValidStaffDirectoryItem(incoming()) && incoming().id == existing().id && incoming().createdAt == existing().createdAt && incoming().updatedAt == request.time;
+      allow delete: if isAdmin() && isValidId(staffId);
+    }
+
+    // Teacher access link requests (created by signed-in Google teacher, approved by Admin)
+    match /accessRequests/{uid} {
+      allow get: if isVerifiedUser() && isValidId(uid) && (request.auth.uid == uid || isAdmin());
+      allow list: if isVerifiedUser() && (isBootstrapAdmin() || existing().uid == request.auth.uid);
+      allow create: if isVerifiedUser() &&
+        isValidId(uid) &&
+        request.auth.uid == uid &&
+        isValidAccessRequest(incoming()) &&
+        incoming().uid == uid &&
+        incoming().email == request.auth.token.email &&
+        incoming().status == 'pending' &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isVerifiedUser() &&
+        isValidId(uid) &&
+        isValidAccessRequest(incoming()) &&
+        incoming().uid == existing().uid &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time && (
+          isAdmin() ||
+          (
+            request.auth.uid == uid &&
+            existing().status == 'pending' &&
+            incoming().status == 'pending' &&
+            incoming().email == existing().email &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['nama', 'requestedRole', 'requestedNote', 'updatedAt'])
+          )
+        );
+      allow delete: if isVerifiedUser() && isValidId(uid) && (isAdmin() || request.auth.uid == uid);
+    }
+
+    // Students collection (Tier 1 Admin full control, Tier 2 Teacher progress-only update, Wali Kelas read-only)
+    match /students/{studentId} {
+      allow get: if isVerifiedUser() && isValidId(studentId) && (isAdmin() || request.auth.token.email in existing().authorizedEmails);
+      allow list: if isVerifiedUser() && (isBootstrapAdmin() || request.auth.token.email in existing().authorizedEmails);
+      allow create: if isAdmin() &&
+        isValidId(studentId) &&
+        isValidStudent(incoming()) &&
+        incoming().nisn == studentId &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isVerifiedUser() &&
+        isValidId(studentId) &&
+        isValidStudent(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().nisn == existing().nisn &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time && (
+          isAdmin() ||
+          (
+            request.auth.token.email in existing().editorEmails &&
+            incoming().authorizedEmails == existing().authorizedEmails &&
+            incoming().editorEmails == existing().editorEmails &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'capaianTerakhir', 'hafalanTerakhir', 'totalHafalan', 'targetJuz', 'ujian', 'kehadiranPersen', 'updatedAt'
+            ])
+          )
+        );
+      allow delete: if isAdmin() && isValidId(studentId);
+    }
+
+    // Bacaan records (linked to students/{nisn}, teacher editors can create/update, wali kelas read-only)
+    match /bacaan/{recordId} {
+      allow get: if isVerifiedUser() && isValidId(recordId) && (isAdmin() || request.auth.token.email in existing().authorizedEmails);
+      allow list: if isVerifiedUser() && (isBootstrapAdmin() || request.auth.token.email in existing().authorizedEmails);
+      allow create: if isVerifiedUser() &&
+        isValidId(recordId) &&
+        isValidBacaan(incoming()) &&
+        incoming().id == recordId &&
+        incoming().authorUid == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        exists(/databases/$(database)/documents/students/$(incoming().nisn)) && (
+          isAdmin() ||
+          (
+            request.auth.token.email in get(/databases/$(database)/documents/students/$(incoming().nisn)).data.editorEmails &&
+            incoming().authorizedEmails == get(/databases/$(database)/documents/students/$(incoming().nisn)).data.authorizedEmails &&
+            incoming().editorEmails == get(/databases/$(database)/documents/students/$(incoming().nisn)).data.editorEmails
+          )
+        );
+      allow update: if isVerifiedUser() &&
+        isValidId(recordId) &&
+        isValidBacaan(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().nisn == existing().nisn &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time && (
+          isAdmin() ||
+          (
+            request.auth.token.email in existing().editorEmails &&
+            incoming().authorUid == request.auth.uid &&
+            incoming().authorizedEmails == existing().authorizedEmails &&
+            incoming().editorEmails == existing().editorEmails &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['tanggal', 'tipe', 'jilid', 'halaman', 'nilai', 'catatan', 'pengajar', 'authorUid', 'updatedAt'])
+          )
+        );
+      allow delete: if isVerifiedUser() && isValidId(recordId) && (isAdmin() || request.auth.token.email in existing().editorEmails);
+    }
+
+    // Tahfidz records
+    match /tahfidz/{recordId} {
+      allow get: if isVerifiedUser() && isValidId(recordId) && (isAdmin() || request.auth.token.email in existing().authorizedEmails);
+      allow list: if isVerifiedUser() && (isBootstrapAdmin() || request.auth.token.email in existing().authorizedEmails);
+      allow create: if isVerifiedUser() &&
+        isValidId(recordId) &&
+        isValidTahfidz(incoming()) &&
+        incoming().id == recordId &&
+        incoming().authorUid == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        exists(/databases/$(database)/documents/students/$(incoming().nisn)) && (
+          isAdmin() ||
+          (
+            request.auth.token.email in get(/databases/$(database)/documents/students/$(incoming().nisn)).data.editorEmails &&
+            incoming().authorizedEmails == get(/databases/$(database)/documents/students/$(incoming().nisn)).data.authorizedEmails &&
+            incoming().editorEmails == get(/databases/$(database)/documents/students/$(incoming().nisn)).data.editorEmails
+          )
+        );
+      allow update: if isVerifiedUser() &&
+        isValidId(recordId) &&
+        isValidTahfidz(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().nisn == existing().nisn &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time && (
+          isAdmin() ||
+          (
+            request.auth.token.email in existing().editorEmails &&
+            incoming().authorUid == request.auth.uid &&
+            incoming().authorizedEmails == existing().authorizedEmails &&
+            incoming().editorEmails == existing().editorEmails &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['tanggal', 'surat', 'ayat', 'status', 'kelancaran', 'guru', 'catatan', 'authorUid', 'updatedAt'])
+          )
+        );
+      allow delete: if isVerifiedUser() && isValidId(recordId) && (isAdmin() || request.auth.token.email in existing().editorEmails);
+    }
+
+    // Absensi records
+    match /absensi/{recordId} {
+      allow get: if isVerifiedUser() && isValidId(recordId) && (isAdmin() || request.auth.token.email in existing().authorizedEmails);
+      allow list: if isVerifiedUser() && (isBootstrapAdmin() || request.auth.token.email in existing().authorizedEmails);
+      allow create: if isVerifiedUser() &&
+        isValidId(recordId) &&
+        isValidAbsensi(incoming()) &&
+        incoming().id == recordId &&
+        incoming().authorUid == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        exists(/databases/$(database)/documents/students/$(incoming().nisn)) && (
+          isAdmin() ||
+          (
+            request.auth.token.email in get(/databases/$(database)/documents/students/$(incoming().nisn)).data.editorEmails &&
+            incoming().authorizedEmails == get(/databases/$(database)/documents/students/$(incoming().nisn)).data.authorizedEmails &&
+            incoming().editorEmails == get(/databases/$(database)/documents/students/$(incoming().nisn)).data.editorEmails
+          )
+        );
+      allow update: if isVerifiedUser() &&
+        isValidId(recordId) &&
+        isValidAbsensi(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().nisn == existing().nisn &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time && (
+          isAdmin() ||
+          (
+            request.auth.token.email in existing().editorEmails &&
+            incoming().authorUid == request.auth.uid &&
+            incoming().authorizedEmails == existing().authorizedEmails &&
+            incoming().editorEmails == existing().editorEmails &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['tanggal', 'sesi', 'status', 'keterangan', 'authorUid', 'updatedAt'])
+          )
+        );
+      allow delete: if isVerifiedUser() && isValidId(recordId) && (isAdmin() || request.auth.token.email in existing().editorEmails);
+    }
+
+    // Global rapor header & signatory settings (Admin-only)
+    match /raporConfig/{configId} {
+      allow get: if isAdmin() && isValidId(configId) && configId == 'main';
+      allow list: if isBootstrapAdmin();
+      allow create, update: if isAdmin() && isValidId(configId) && configId == 'main' && isValidRaporSettings(incoming()) && incoming().updatedAt == request.time;
+      allow delete: if isAdmin() && isValidId(configId);
+    }
+
+    // Rapor print status (Admin-only)
+    match /raporStatuses/{nisn} {
+      allow get: if isAdmin() && isValidId(nisn);
+      allow list: if isBootstrapAdmin();
+      allow create, update: if isAdmin() && isValidId(nisn) && isValidRaporStatus(incoming()) && incoming().nisn == nisn && incoming().updatedAt == request.time;
+      allow delete: if isAdmin() && isValidId(nisn);
+    }
+
+    // Rapor batch print logs (Admin-only)
+    match /raporLogs/{logId} {
+      allow get: if isAdmin() && isValidId(logId);
+      allow list: if isBootstrapAdmin();
+      allow create: if isAdmin() && isValidId(logId) && isValidRaporLog(incoming()) && incoming().id == logId && incoming().createdAt == request.time;
+      allow update: if false;
+      allow delete: if isAdmin() && isValidId(logId);
+    }
+
+    // Non-PII public lookup report by exact NISN (get-only, listing strictly disabled)
+    match /publicReports/{nisn} {
+      allow get: if isValidId(nisn);
+      allow list: if false;
+      allow create, update: if isVerifiedUser() &&
+        isValidId(nisn) &&
+        isValidPublicReport(incoming()) &&
+        incoming().nisn == nisn &&
+        incoming().updatedAt == request.time && (
+          isAdmin() ||
+          (
+            exists(/databases/$(database)/documents/students/$(nisn)) &&
+            request.auth.token.email in get(/databases/$(database)/documents/students/$(nisn)).data.editorEmails
+          )
+        );
+      allow delete: if isAdmin() && isValidId(nisn);
+    }
+  }
+}

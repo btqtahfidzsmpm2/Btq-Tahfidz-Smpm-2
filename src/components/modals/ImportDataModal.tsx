@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { Student } from '../../types';
 import { storage } from '../../services/storage';
+import { cloudDb, StaffDirectoryRecord } from '../../services/cloudDb';
+import { sanitizeDocId } from '../../services/firebase';
 import { formatBtqClassWithGender } from '../../utils/access';
 import {
   X,
@@ -45,6 +47,7 @@ interface ParsedTeacherRow {
   kelompok: string;
   ruangan: string;
   kontak?: string;
+  email?: string;
 }
 
 const NGAJI_HEADER =
@@ -61,17 +64,17 @@ const TAHFIDZ_SAMPLE_CSV = `${TAHFIDZ_HEADER}
 0082600002,NAMA SISWA BTQ 2,L,7A,HALAQAH TAHFIDZ JUZ 30,USTADZ FAUZAN,MASJID AL-IKHLAS,Juz 30 & 29,1.5 Juz,QS. An-Naba: 1-40,Sangat Lancar (Mumtaz),Mutqin dan siap tasmi
 0082600003,NAMA SANTRI TAHFIDZ 3,P,8B,HALAQAH TAHFIDZ MUTQIN,USTADZAH AISYAH,RUANGAN TAHFIDZ,Juz 30,1 Juz,QS. Al-Mulk: 1-15,Lancar (Jayyid Jiddan),Perhatikan panjang pendek mad`;
 
-const GURU_BTQ_HEADER = 'NAMA_GURU_BTQ,KELOMPOK_BTQ,RUANGAN_BTQ,KONTAK_WA';
+const GURU_BTQ_HEADER = 'NAMA_GURU_BTQ,KELOMPOK_BTQ,RUANGAN_BTQ,KONTAK_WA,EMAIL_GOOGLE';
 
 const GURU_BTQ_SAMPLE_CSV = `${GURU_BTQ_HEADER}
-USTADZAH SITI,TILAWATI 4 PI,RUANGAN 7E,081234567890
-USTADZ AHMAD,AL-QUR'AN PA,RUANGAN 7A,081298765432`;
+USTADZAH SITI,TILAWATI 4 PI,RUANGAN 7E,081234567890,ustadzah.siti@gmail.com
+USTADZ AHMAD,AL-QUR'AN PA,RUANGAN 7A,081298765432,ustadz.ahmad@gmail.com`;
 
-const GURU_TAHFIDZ_HEADER = 'NAMA_GURU_TAHFIDZ,HALAQAH_TAHFIDZ,RUANGAN_TAHFIDZ,KONTAK_WA';
+const GURU_TAHFIDZ_HEADER = 'NAMA_GURU_TAHFIDZ,HALAQAH_TAHFIDZ,RUANGAN_TAHFIDZ,KONTAK_WA,EMAIL_GOOGLE';
 
 const GURU_TAHFIDZ_SAMPLE_CSV = `${GURU_TAHFIDZ_HEADER}
-USTADZ FAUZAN,HALAQAH TAHFIDZ JUZ 30,MASJID AL-IKHLAS,081345678901
-USTADZAH AISYAH,HALAQAH TAHFIDZ MUTQIN,RUANGAN TAHFIDZ,081356789012`;
+USTADZ FAUZAN,HALAQAH TAHFIDZ JUZ 30,MASJID AL-IKHLAS,081345678901,ustadz.fauzan@gmail.com
+USTADZAH AISYAH,HALAQAH TAHFIDZ MUTQIN,RUANGAN TAHFIDZ,081356789012,ustadzah.aisyah@gmail.com`;
 
 function parseCSVLine(line: string): string[] {
   const delimiter = line.includes('\t') ? '\t' : ',';
@@ -108,6 +111,7 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({
   const [parsedTeacherRows, setParsedTeacherRows] = useState<ParsedTeacherRow[]>([]);
   const [parseErrors, setParseErrors] = useState<string[]>([]);
   const [hasCopied, setHasCopied] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
 
   if (!isOpen) return null;
 
@@ -330,8 +334,10 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({
           (cols[2] || '').trim() ||
           (effectiveMode === 'guru_tahfidz' ? 'RUANGAN TAHFIDZ' : 'RUANGAN KELAS');
         const kontak = (cols[3] || '').trim() || undefined;
+        const emailRaw = (cols[4] || '').trim().toLowerCase();
+        const email = emailRaw && emailRaw.includes('@') ? emailRaw : undefined;
 
-        validTeachers.push({ nama, kelompok, ruangan, kontak });
+        validTeachers.push({ nama, kelompok, ruangan, kontak, email });
       });
 
       setParsedTeacherRows(validTeachers);
@@ -436,55 +442,118 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({
     );
   };
 
-  const handleExecuteImport = () => {
-    if (importMode === 'ngaji') {
-      if (parsedNgajiRows.length === 0) {
-        onNotify('error', 'Tidak Ada Data BTQ', 'Silakan tempel atau unggah file data Siswa & Guru BTQ yang valid.');
-        return;
-      }
-      const res = storage.importStudentsBatch(parsedNgajiRows);
-      onNotify(
-        'success',
-        'Import Data Siswa & Guru BTQ Berhasil',
-        `Berhasil memproses ${parsedNgajiRows.length} siswa BTQ (${res.added} baru, ${res.updated} diperbarui). Pengajar otomatis masuk ke Guru Ngaji (BTQ).`
-      );
-    } else if (importMode === 'tahfidz') {
-      if (parsedTahfidzRows.length === 0) {
-        onNotify('error', 'Tidak Ada Data Tahfidz', 'Silakan tempel atau unggah file data Santri Program Tahfidz yang valid.');
-        return;
-      }
-      const res = storage.importTahfidzBatch(parsedTahfidzRows);
-      onNotify(
-        'success',
-        'Import Data Santri & Guru Tahfidz Berhasil',
-        `Berhasil memproses ${parsedTahfidzRows.length} santri Tahfidz (${res.merged} digabung ke siswa yang ada tanpa menimpa Kelas BTQ, ${res.added} baru). Pembimbing otomatis masuk ke Guru Tahfidz.`
-      );
-    } else if (importMode === 'guru_btq') {
-      if (parsedTeacherRows.length === 0) {
-        onNotify('error', 'Tidak Ada Data Guru BTQ', 'Silakan tempel atau unggah daftar Guru BTQ yang valid.');
-        return;
-      }
-      const res = storage.importTeachersBatch(parsedTeacherRows, 'guru_ngaji');
-      onNotify(
-        'success',
-        'Import Daftar Guru BTQ Berhasil',
-        `Berhasil memproses ${parsedTeacherRows.length} Guru BTQ (${res.added} baru, ${res.updated} diperbarui) khusus pada Dashboard Guru Ngaji.`
-      );
-    } else {
-      if (parsedTeacherRows.length === 0) {
-        onNotify('error', 'Tidak Ada Data Guru Tahfidz', 'Silakan tempel atau unggah daftar Guru Tahfidz yang valid.');
-        return;
-      }
-      const res = storage.importTeachersBatch(parsedTeacherRows, 'guru_tahfidz');
-      onNotify(
-        'success',
-        'Import Daftar Guru Tahfidz Berhasil',
-        `Berhasil memproses ${parsedTeacherRows.length} Guru Tahfidz (${res.added} baru, ${res.updated} diperbarui) khusus pada Dashboard Guru Tahfidz.`
-      );
-    }
+  const toStaffDirRecords = (teachersList: ReturnType<typeof storage.getTeachers>): StaffDirectoryRecord[] => {
+    const existingWali = cloudDb
+      .getCachedStaffDirectory()
+      .filter(d => d.role === 'wali_kelas');
+    return [
+      ...teachersList.map(t => ({
+        id: sanitizeDocId(t.id, 128),
+        nama: t.nama,
+        role: t.role,
+        kelompokBTQ: t.kelompokBTQ || '-',
+        kelompokTahfidz: t.kelompokTahfidz,
+        ruangan: t.ruangan || '-',
+        kontak: t.kontak,
+        email: t.email
+      })),
+      ...existingWali
+    ];
+  };
 
-    onSuccess();
-    onClose();
+  const handleExecuteImport = async () => {
+    if (isImporting) return;
+    setIsImporting(true);
+    try {
+      if (importMode === 'ngaji') {
+        if (parsedNgajiRows.length === 0) {
+          onNotify('error', 'Tidak Ada Data BTQ', 'Silakan tempel atau unggah file data Siswa & Guru BTQ yang valid.');
+          return;
+        }
+        const res = storage.importStudentsBatch(parsedNgajiRows);
+        if (cloudDb.isCloudAuthenticated()) {
+          const allStudents = storage.getStudents();
+          const importedNisns = new Set(parsedNgajiRows.map(r => r.nisn));
+          const affectedStudents = allStudents.filter(s => importedNisns.has(s.nisn));
+          const staffDir = toStaffDirRecords(res.teachers);
+          await cloudDb.saveStaffDirectoryBatch(staffDir);
+          await cloudDb.syncStudentsBatch(affectedStudents, staffDir, false);
+        }
+        onNotify(
+          'success',
+          'Import Data Siswa & Guru BTQ Berhasil',
+          `Berhasil memproses ${parsedNgajiRows.length} siswa BTQ (${res.added} baru, ${res.updated} diperbarui). Pengajar otomatis masuk ke Guru Ngaji (BTQ).`
+        );
+      } else if (importMode === 'tahfidz') {
+        if (parsedTahfidzRows.length === 0) {
+          onNotify('error', 'Tidak Ada Data Tahfidz', 'Silakan tempel atau unggah file data Santri Program Tahfidz yang valid.');
+          return;
+        }
+        const res = storage.importTahfidzBatch(parsedTahfidzRows);
+        if (cloudDb.isCloudAuthenticated()) {
+          const allStudents = storage.getStudents();
+          const importedNisns = new Set(parsedTahfidzRows.map(r => r.nisn));
+          const affectedStudents = allStudents.filter(s => importedNisns.has(s.nisn));
+          const staffDir = toStaffDirRecords(res.teachers);
+          await cloudDb.saveStaffDirectoryBatch(staffDir);
+          await cloudDb.syncStudentsBatch(affectedStudents, staffDir, false);
+          if (res.newTahfidzRecords.length > 0) {
+            const studentsMap = new Map(
+              affectedStudents.map(s => [sanitizeDocId(s.nisn, 40), s])
+            );
+            await cloudDb.saveTahfidzBatchCloud(res.newTahfidzRecords, studentsMap, staffDir);
+          }
+        }
+        onNotify(
+          'success',
+          'Import Data Santri & Guru Tahfidz Berhasil',
+          `Berhasil memproses ${parsedTahfidzRows.length} santri Tahfidz (${res.merged} digabung ke siswa yang ada tanpa menimpa Kelas BTQ, ${res.added} baru). Pembimbing otomatis masuk ke Guru Tahfidz.`
+        );
+      } else if (importMode === 'guru_btq') {
+        if (parsedTeacherRows.length === 0) {
+          onNotify('error', 'Tidak Ada Data Guru BTQ', 'Silakan tempel atau unggah daftar Guru BTQ yang valid.');
+          return;
+        }
+        const res = storage.importTeachersBatch(parsedTeacherRows, 'guru_ngaji');
+        if (cloudDb.isCloudAuthenticated()) {
+          const staffDir = toStaffDirRecords(res.teachers);
+          await cloudDb.saveStaffDirectoryBatch(staffDir);
+          await cloudDb.recomputeAllPermissionsCloud(storage.getStudents(), staffDir);
+        }
+        onNotify(
+          'success',
+          'Import Daftar Guru BTQ Berhasil',
+          `Berhasil memproses ${parsedTeacherRows.length} Guru BTQ (${res.added} baru, ${res.updated} diperbarui) khusus pada Dashboard Guru Ngaji.`
+        );
+      } else {
+        if (parsedTeacherRows.length === 0) {
+          onNotify('error', 'Tidak Ada Data Guru Tahfidz', 'Silakan tempel atau unggah daftar Guru Tahfidz yang valid.');
+          return;
+        }
+        const res = storage.importTeachersBatch(parsedTeacherRows, 'guru_tahfidz');
+        if (cloudDb.isCloudAuthenticated()) {
+          const staffDir = toStaffDirRecords(res.teachers);
+          await cloudDb.saveStaffDirectoryBatch(staffDir);
+          await cloudDb.recomputeAllPermissionsCloud(storage.getStudents(), staffDir);
+        }
+        onNotify(
+          'success',
+          'Import Daftar Guru Tahfidz Berhasil',
+          `Berhasil memproses ${parsedTeacherRows.length} Guru Tahfidz (${res.added} baru, ${res.updated} diperbarui) khusus pada Dashboard Guru Tahfidz.`
+        );
+      }
+
+      onSuccess();
+      onClose();
+    } catch (err: any) {
+      onNotify(
+        'error',
+        'Sebagian Sinkronisasi Cloud Gagal',
+        err?.message || 'Data tersimpan lokal, namun sinkronisasi ke Firestore terkendala.'
+      );
+    } finally {
+      setIsImporting(false);
+    }
   };
 
   const fmt = getFormatStrings();
@@ -987,7 +1056,8 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({
                       ['1', 'NAMA_GURU_BTQ', 'USTADZAH SITI', 'Nama lengkap Ustadz/ah pengajar kelas BTQ.'],
                       ['2', 'KELOMPOK_BTQ', 'TILAWATI 4 PI, TILAWATI 5 PI', 'Kelas BTQ yang diampu (pisahkan dengan koma jika >1 kelas).'],
                       ['3', 'RUANGAN_BTQ', 'RUANGAN 7E', 'Lokasi ruang mengajar BTQ.'],
-                      ['4', 'KONTAK_WA', '081234567890', 'Nomor WhatsApp guru BTQ (opsional).']
+                      ['4', 'KONTAK_WA', '081234567890', 'Nomor WhatsApp guru BTQ (opsional).'],
+                      ['5', 'EMAIL_GOOGLE', 'ustadzah.siti@gmail.com', 'Alamat Gmail guru untuk Login Cloud Online (opsional).']
                     ].map(([no, col, ex, desc]) => (
                       <tr key={no}>
                         <td className="p-2.5 font-mono">{no}</td>
@@ -1017,7 +1087,8 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({
                       ['1', 'NAMA_GURU_TAHFIDZ', 'USTADZ FAUZAN', 'Nama lengkap Ustadz/ah pembimbing program Tahfidz.'],
                       ['2', 'HALAQAH_TAHFIDZ', 'HALAQAH TAHFIDZ JUZ 30', 'Nama halaqah Tahfidz binaan.'],
                       ['3', 'RUANGAN_TAHFIDZ', 'MASJID AL-IKHLAS', 'Lokasi halaqah Tahfidz berlangsung.'],
-                      ['4', 'KONTAK_WA', '081345678901', 'Nomor WhatsApp pembimbing Tahfidz (opsional).']
+                      ['4', 'KONTAK_WA', '081345678901', 'Nomor WhatsApp pembimbing Tahfidz (opsional).'],
+                      ['5', 'EMAIL_GOOGLE', 'ustadz.fauzan@gmail.com', 'Alamat Gmail pembimbing untuk Login Cloud Online (opsional).']
                     ].map(([no, col, ex, desc]) => (
                       <tr key={no}>
                         <td className="p-2.5 font-mono">{no}</td>
@@ -1047,10 +1118,10 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({
           {activeTab === 'upload' && (
             <button
               type="button"
-              disabled={currentCount === 0}
+              disabled={currentCount === 0 || isImporting}
               onClick={handleExecuteImport}
               className={`py-2 px-5 rounded-xl text-xs font-bold transition-colors shadow-sm flex items-center gap-1.5 ${
-                currentCount > 0
+                currentCount > 0 && !isImporting
                   ? importMode === 'tahfidz' || importMode === 'guru_tahfidz'
                     ? 'bg-amber-500 hover:bg-amber-600 text-slate-950 cursor-pointer'
                     : 'bg-emerald-700 hover:bg-emerald-800 text-white cursor-pointer'
@@ -1059,7 +1130,9 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({
             >
               <CheckCircle2 className="w-4 h-4" />
               <span>
-                {currentCount > 0
+                {isImporting
+                  ? 'Mengimpor ke Cloud...'
+                  : currentCount > 0
                   ? `Import ${currentCount} Data (${fmt.label})`
                   : 'Import Data'}
               </span>

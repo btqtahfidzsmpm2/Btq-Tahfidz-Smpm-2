@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Student } from '../../types';
 import { storage } from '../../services/storage';
+import { cloudDb } from '../../services/cloudDb';
 import { X, GraduationCap } from 'lucide-react';
 
 interface InputUjianModalProps {
@@ -61,7 +62,7 @@ export const InputUjianModal: React.FC<InputUjianModalProps> = ({
 
   if (!isOpen) return null;
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!nisn) {
       onNotify('error', 'Pilih Siswa', 'Silakan pilih siswa yang dinilai.');
@@ -78,6 +79,17 @@ export const InputUjianModal: React.FC<InputUjianModalProps> = ({
       kelulusan,
       keterangan
     });
+
+    if (cloudDb.isCloudAuthenticated()) {
+      const updatedStudent = storage.getStudents().find(s => s.nisn === nisn);
+      if (updatedStudent) {
+        try {
+          await cloudDb.updateStudentProgressCloud(updatedStudent);
+        } catch (err: any) {
+          onNotify('error', 'Gagal Sinkron Cloud', err?.message || 'Periksa izin Firestore.');
+        }
+      }
+    }
 
     onNotify(
       'success',

@@ -195,7 +195,7 @@ export const storage = {
         id:
           existingIdx !== -1
             ? absensiList[existingIdx].id
-            : `abs-${Date.now()}-${idx}-${entry.nisn}`,
+            : `${entry.nisn}_${tanggal}_${sesi}`,
         nisn: entry.nisn,
         tanggal,
         sesi,
@@ -571,7 +571,8 @@ export const storage = {
         role: 'guru_ngaji',
         kelompokBTQ: kelompokArr.length > 0 ? kelompokArr.join(', ') : existing?.kelompokBTQ || 'BTQ REGULER',
         ruangan: ruanganArr.length > 0 ? ruanganArr.slice(0, 3).join(' / ') : existing?.ruangan || 'RUANGAN KELAS',
-        kontak: existing?.kontak || undefined
+        kontak: existing?.kontak || undefined,
+        email: existing?.email || undefined
       });
     });
 
@@ -592,7 +593,8 @@ export const storage = {
         kelompokBTQ: halaqahStr,
         kelompokTahfidz: halaqahStr,
         ruangan: ruanganArr.length > 0 ? ruanganArr.slice(0, 3).join(' / ') : existing?.ruangan || 'RUANGAN TAHFIDZ',
-        kontak: existing?.kontak || undefined
+        kontak: existing?.kontak || undefined,
+        email: existing?.email || undefined
       });
     });
 
@@ -699,7 +701,7 @@ export const storage = {
     };
   },
 
-  importStudentsBatch(incoming: Omit<Student, 'id'>[]): { added: number; updated: number; total: number; teachersCount: number } {
+  importStudentsBatch(incoming: Omit<Student, 'id'>[]): { added: number; updated: number; total: number; teachersCount: number; teachers: Teacher[] } {
     const existing = this.getStudents();
     let added = 0;
     let updated = 0;
@@ -761,7 +763,13 @@ export const storage = {
     // Sync teachers cleanly (preserving manually added/imported teachers)
     const syncedTeachers = this.syncTeachersFromStudents(false);
 
-    return { added, updated, total: result.length, teachersCount: syncedTeachers.total };
+    return {
+      added,
+      updated,
+      total: result.length,
+      teachersCount: syncedTeachers.total,
+      teachers: syncedTeachers.teachers
+    };
   },
 
   /**
@@ -773,9 +781,10 @@ export const storage = {
       kelompok: string;
       ruangan: string;
       kontak?: string;
+      email?: string;
     }>,
     role: 'guru_ngaji' | 'guru_tahfidz'
-  ): { added: number; updated: number; total: number } {
+  ): { added: number; updated: number; total: number; teachers: Teacher[] } {
     const existing = this.getTeachers();
     const map = new Map<string, Teacher>();
     existing.forEach(t => {
@@ -799,6 +808,7 @@ export const storage = {
         inc.kelompok.trim() || (role === 'guru_tahfidz' ? 'HALAQAH TAHFIDZ' : 'BTQ REGULER');
       const cleanRoom =
         inc.ruangan.trim() || (role === 'guru_tahfidz' ? 'RUANGAN TAHFIDZ' : 'RUANGAN KELAS');
+      const cleanEmail = inc.email?.trim().toLowerCase() || undefined;
 
       if (existingTeacher) {
         map.set(key, {
@@ -807,7 +817,8 @@ export const storage = {
           kelompokBTQ: cleanGroup,
           kelompokTahfidz: role === 'guru_tahfidz' ? cleanGroup : existingTeacher.kelompokTahfidz,
           ruangan: cleanRoom,
-          kontak: inc.kontak?.trim() || existingTeacher.kontak
+          kontak: inc.kontak?.trim() || existingTeacher.kontak,
+          email: cleanEmail || existingTeacher.email
         });
         updated++;
       } else {
@@ -818,7 +829,8 @@ export const storage = {
           kelompokBTQ: cleanGroup,
           kelompokTahfidz: role === 'guru_tahfidz' ? cleanGroup : undefined,
           ruangan: cleanRoom,
-          kontak: inc.kontak?.trim() || undefined
+          kontak: inc.kontak?.trim() || undefined,
+          email: cleanEmail
         });
         added++;
       }
@@ -829,7 +841,7 @@ export const storage = {
       return a.nama.localeCompare(b.nama);
     });
     this.saveTeachers(result);
-    return { added, updated, total: result.length };
+    return { added, updated, total: result.length, teachers: result };
   },
 
   /**
@@ -851,7 +863,14 @@ export const storage = {
       kelancaran: 'Sangat Lancar (Mumtaz)' | 'Lancar (Jayyid Jiddan)' | 'Cukup (Jayyid)';
       catatan?: string;
     }>
-  ): { added: number; merged: number; total: number; teachersCount: number } {
+  ): {
+    added: number;
+    merged: number;
+    total: number;
+    teachersCount: number;
+    teachers: Teacher[];
+    newTahfidzRecords: TahfidzRecord[];
+  } {
     const existing = this.getStudents();
     const existingTahfidz = this.getTahfidz();
     const today = new Date().toISOString().slice(0, 10);
@@ -957,7 +976,14 @@ export const storage = {
     // Automatically sync & merge teachers (e.g., Guru Ngaji + Tahfidz becomes 1 unified account)
     const syncedTeachers = this.syncTeachersFromStudents(false);
 
-    return { added, merged, total: result.length, teachersCount: syncedTeachers.total };
+    return {
+      added,
+      merged,
+      total: result.length,
+      teachersCount: syncedTeachers.total,
+      teachers: syncedTeachers.teachers,
+      newTahfidzRecords
+    };
   },
 
   /**
@@ -991,7 +1017,7 @@ export const storage = {
         id:
           existingBacaanIdx !== -1
             ? bacaanList[existingBacaanIdx].id
-            : `b-${Date.now()}-${idx}-${item.nisn}`,
+            : `b-${item.nisn}-${item.tanggal}`,
         nisn: item.nisn,
         tanggal: item.tanggal,
         tipe: item.tipe,
@@ -1017,7 +1043,7 @@ export const storage = {
           id:
             existingAbsIdx !== -1
               ? absensiList[existingAbsIdx].id
-              : `abs-${Date.now()}-${idx}-${item.nisn}`,
+              : `${item.nisn}_${item.tanggal}_btq`,
           nisn: item.nisn,
           tanggal: item.tanggal,
           sesi: 'btq',
@@ -1150,9 +1176,10 @@ export const storage = {
     jenisCetak: RaporPrintBatchLog['jenisCetak'];
     semester: string;
     tahunAjaran: string;
-  }): void {
+  }): { updatedStatuses: RaporPrintStatus[]; newLog: RaporPrintBatchLog } {
     const nowIso = new Date().toISOString();
     const statuses = this.getRaporPrintStatuses();
+    const updatedStatuses: RaporPrintStatus[] = [];
 
     if (
       params.jenisCetak !== 'Rekapitulasi Nilai Kelas' &&
@@ -1160,7 +1187,7 @@ export const storage = {
     ) {
       params.students.forEach(s => {
         const prev = statuses[s.nisn];
-        statuses[s.nisn] = {
+        const nextStatus: RaporPrintStatus = {
           nisn: s.nisn,
           printCount: (prev?.printCount || 0) + 1,
           lastPrintedAt: nowIso,
@@ -1168,6 +1195,8 @@ export const storage = {
           semester: params.semester,
           tahunAjaran: params.tahunAjaran
         };
+        statuses[s.nisn] = nextStatus;
+        updatedStatuses.push(nextStatus);
       });
       this.saveRaporPrintStatuses(statuses);
     }
@@ -1185,6 +1214,7 @@ export const storage = {
       nisnList: params.students.map(s => s.nisn)
     };
     this.saveRaporPrintLogs([newLog, ...logs].slice(0, 100));
+    return { updatedStatuses, newLog };
   },
 
   resetStudentRaporStatus(nisn: string): void {

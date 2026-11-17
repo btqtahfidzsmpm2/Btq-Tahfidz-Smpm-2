@@ -1,0 +1,783 @@
+{
+  "entities": {
+    "AdminDoc": {
+      "title": "AdminDoc",
+      "description": "Administrator registry document keyed by Firebase Auth UID.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "maxLength": 150
+        },
+        "nama": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["uid", "email", "nama", "createdAt"]
+    },
+    "StaffUser": {
+      "title": "StaffUser",
+      "description": "Authenticated staff profile linking a verified Google account to a role and class scope.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "maxLength": 150
+        },
+        "nama": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "role": {
+          "type": "string",
+          "enum": ["admin", "guru_ngaji", "guru_tahfidz", "wali_kelas"]
+        },
+        "teacherId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "assignedGroup": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "assignedTahfidzGroup": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "assignedClass": {
+          "type": "string",
+          "maxLength": 30
+        },
+        "isActive": {
+          "type": "boolean"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["uid", "email", "nama", "role", "isActive", "createdAt", "updatedAt"]
+    },
+    "StaffDirectoryItem": {
+      "title": "StaffDirectoryItem",
+      "description": "Teacher and Wali Kelas directory entry managed by Admin.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "nama": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "role": {
+          "type": "string",
+          "enum": ["guru_ngaji", "guru_tahfidz", "wali_kelas"]
+        },
+        "kelompokBTQ": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "kelompokTahfidz": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "assignedClass": {
+          "type": "string",
+          "maxLength": 30
+        },
+        "ruangan": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "kontak": {
+          "type": "string",
+          "maxLength": 40
+        },
+        "email": {
+          "type": "string",
+          "maxLength": 150
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["id", "nama", "role", "kelompokBTQ", "ruangan", "createdAt", "updatedAt"]
+    },
+    "AccessRequest": {
+      "title": "AccessRequest",
+      "description": "Pending request from a Google-authenticated teacher asking Admin to link their account.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "maxLength": 150
+        },
+        "nama": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "requestedRole": {
+          "type": "string",
+          "enum": ["guru_ngaji", "guru_tahfidz", "wali_kelas"]
+        },
+        "requestedNote": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "status": {
+          "type": "string",
+          "enum": ["pending", "approved", "rejected"]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["uid", "email", "nama", "requestedRole", "requestedNote", "status", "createdAt", "updatedAt"]
+    },
+    "StudentRecord": {
+      "title": "StudentRecord",
+      "description": "Student BTQ and Tahfidz record scoped to authorized teachers and homeroom teachers.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "nisn": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 40,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "nama": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 150
+        },
+        "gender": {
+          "type": "string",
+          "enum": ["L", "P"]
+        },
+        "kelas": {
+          "type": "string",
+          "maxLength": 30
+        },
+        "kelasBTQ": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "pengajar": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "ruangan": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "waliKelas": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "isTahfidz": {
+          "type": "boolean"
+        },
+        "pembimbingTahfidz": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "halaqahTahfidz": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "ruanganTahfidz": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "targetJuz": {
+          "type": "string",
+          "maxLength": 80
+        },
+        "totalHafalan": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "hafalanTerakhir": {
+          "type": "string",
+          "maxLength": 150
+        },
+        "capaianTerakhir": {
+          "type": "object"
+        },
+        "ujian": {
+          "type": "object"
+        },
+        "kehadiranPersen": {
+          "type": "number"
+        },
+        "authorizedEmails": {
+          "type": "array"
+        },
+        "editorEmails": {
+          "type": "array"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "nisn",
+        "nama",
+        "gender",
+        "kelas",
+        "kelasBTQ",
+        "pengajar",
+        "ruangan",
+        "waliKelas",
+        "isTahfidz",
+        "capaianTerakhir",
+        "ujian",
+        "authorizedEmails",
+        "editorEmails",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "BacaanRecordDoc": {
+      "title": "BacaanRecordDoc",
+      "description": "Tilawati or Al-Qur'an daily progress record.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "nisn": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 40,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "tanggal": {
+          "type": "string",
+          "maxLength": 30
+        },
+        "tipe": {
+          "type": "string",
+          "enum": ["Tilawati Remaja", "Al-Qur'an"]
+        },
+        "jilid": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "halaman": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "nilai": {
+          "type": "string",
+          "enum": ["A", "B", "C"]
+        },
+        "catatan": {
+          "type": "string",
+          "maxLength": 300
+        },
+        "pengajar": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "authorUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "authorizedEmails": {
+          "type": "array"
+        },
+        "editorEmails": {
+          "type": "array"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "nisn",
+        "tanggal",
+        "tipe",
+        "jilid",
+        "halaman",
+        "nilai",
+        "pengajar",
+        "authorUid",
+        "authorizedEmails",
+        "editorEmails",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "TahfidzRecordDoc": {
+      "title": "TahfidzRecordDoc",
+      "description": "Tahfidz memorization submission record.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "nisn": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 40,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "tanggal": {
+          "type": "string",
+          "maxLength": 30
+        },
+        "surat": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "ayat": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "status": {
+          "type": "string",
+          "enum": ["Ziyadah", "Muroja'ah", "Mutqin"]
+        },
+        "kelancaran": {
+          "type": "string",
+          "enum": ["Sangat Lancar (Mumtaz)", "Lancar (Jayyid Jiddan)", "Cukup (Jayyid)"]
+        },
+        "guru": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "catatan": {
+          "type": "string",
+          "maxLength": 300
+        },
+        "authorUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "authorizedEmails": {
+          "type": "array"
+        },
+        "editorEmails": {
+          "type": "array"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "nisn",
+        "tanggal",
+        "surat",
+        "ayat",
+        "status",
+        "kelancaran",
+        "guru",
+        "authorUid",
+        "authorizedEmails",
+        "editorEmails",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "AbsensiRecordDoc": {
+      "title": "AbsensiRecordDoc",
+      "description": "Daily attendance record keyed by nisn_tanggal_sesi.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "nisn": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 40,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "tanggal": {
+          "type": "string",
+          "maxLength": 30
+        },
+        "sesi": {
+          "type": "string",
+          "enum": ["btq", "tahfidz"]
+        },
+        "status": {
+          "type": "string",
+          "enum": ["Hadir", "Sakit", "Izin", "Alpa"]
+        },
+        "keterangan": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "authorUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "authorizedEmails": {
+          "type": "array"
+        },
+        "editorEmails": {
+          "type": "array"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "nisn",
+        "tanggal",
+        "sesi",
+        "status",
+        "authorUid",
+        "authorizedEmails",
+        "editorEmails",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "RaporSettingsDoc": {
+      "title": "RaporSettingsDoc",
+      "description": "Global school report header and signatory settings.",
+      "type": "object",
+      "properties": {
+        "tahunAjaran": {
+          "type": "string",
+          "maxLength": 40
+        },
+        "semester": {
+          "type": "string",
+          "maxLength": 30
+        },
+        "tanggalRapor": {
+          "type": "string",
+          "maxLength": 60
+        },
+        "kepalaSekolah": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "nbmKepala": {
+          "type": "string",
+          "maxLength": 60
+        },
+        "koordinator": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "tahunAjaran",
+        "semester",
+        "tanggalRapor",
+        "kepalaSekolah",
+        "nbmKepala",
+        "koordinator",
+        "updatedAt"
+      ]
+    },
+    "RaporPrintStatusDoc": {
+      "title": "RaporPrintStatusDoc",
+      "description": "Per-student report print tracking owned by Admin.",
+      "type": "object",
+      "properties": {
+        "nisn": {
+          "type": "string",
+          "maxLength": 40,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "printCount": {
+          "type": "number"
+        },
+        "lastPrintedAt": {
+          "type": "string",
+          "maxLength": 50
+        },
+        "lastPrintedBy": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "semester": {
+          "type": "string",
+          "maxLength": 30
+        },
+        "tahunAjaran": {
+          "type": "string",
+          "maxLength": 40
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["nisn", "printCount", "lastPrintedAt", "lastPrintedBy", "semester", "tahunAjaran", "updatedAt"]
+    },
+    "RaporPrintBatchLogDoc": {
+      "title": "RaporPrintBatchLogDoc",
+      "description": "Batch report print and PDF download audit log.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "printedAt": {
+          "type": "string",
+          "maxLength": 50
+        },
+        "printedBy": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "kelasLabel": {
+          "type": "string",
+          "maxLength": 60
+        },
+        "jenisCetak": {
+          "type": "string",
+          "maxLength": 80
+        },
+        "totalRapor": {
+          "type": "number"
+        },
+        "semester": {
+          "type": "string",
+          "maxLength": 30
+        },
+        "tahunAjaran": {
+          "type": "string",
+          "maxLength": 40
+        },
+        "nisnList": {
+          "type": "array"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["id", "printedAt", "printedBy", "kelasLabel", "jenisCetak", "totalRapor", "semester", "tahunAjaran", "nisnList", "createdAt"]
+    },
+    "PublicReportDoc": {
+      "title": "PublicReportDoc",
+      "description": "Non-PII parent lookup report keyed strictly by exact NISN (get-only, list disabled).",
+      "type": "object",
+      "properties": {
+        "nisn": {
+          "type": "string",
+          "maxLength": 40,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "nama": {
+          "type": "string",
+          "maxLength": 150
+        },
+        "gender": {
+          "type": "string",
+          "enum": ["L", "P"]
+        },
+        "kelas": {
+          "type": "string",
+          "maxLength": 30
+        },
+        "kelasBTQ": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "pengajar": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "ruangan": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "waliKelas": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "isTahfidz": {
+          "type": "boolean"
+        },
+        "halaqahTahfidz": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "targetJuz": {
+          "type": "string",
+          "maxLength": 80
+        },
+        "totalHafalan": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "hafalanTerakhir": {
+          "type": "string",
+          "maxLength": 150
+        },
+        "capaianTerakhir": {
+          "type": "object"
+        },
+        "ujian": {
+          "type": "object"
+        },
+        "kehadiranPersen": {
+          "type": "number"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["nisn", "nama", "gender", "kelas", "kelasBTQ", "pengajar", "ruangan", "waliKelas", "isTahfidz", "capaianTerakhir", "ujian", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/admins/{uid}": {
+      "schema": { "$ref": "#/entities/AdminDoc" },
+      "description": "Verified administrator UID registry."
+    },
+    "/staffUsers/{uid}": {
+      "schema": { "$ref": "#/entities/StaffUser" },
+      "description": "Authenticated staff member profile and role assignment."
+    },
+    "/staffDirectory/{staffId}": {
+      "schema": { "$ref": "#/entities/StaffDirectoryItem" },
+      "description": "Teacher and homeroom teacher directory managed by Admin."
+    },
+    "/accessRequests/{uid}": {
+      "schema": { "$ref": "#/entities/AccessRequest" },
+      "description": "Teacher/staff account linkage requests awaiting Admin approval."
+    },
+    "/students/{studentId}": {
+      "schema": { "$ref": "#/entities/StudentRecord" },
+      "description": "Real-time student records scoped by authorizedEmails & editorEmails."
+    },
+    "/bacaan/{recordId}": {
+      "schema": { "$ref": "#/entities/BacaanRecordDoc" },
+      "description": "Real-time Tilawati and Al-Qur'an progress records."
+    },
+    "/tahfidz/{recordId}": {
+      "schema": { "$ref": "#/entities/TahfidzRecordDoc" },
+      "description": "Real-time Tahfidz memorization records."
+    },
+    "/absensi/{recordId}": {
+      "schema": { "$ref": "#/entities/AbsensiRecordDoc" },
+      "description": "Real-time daily attendance records."
+    },
+    "/raporConfig/{configId}": {
+      "schema": { "$ref": "#/entities/RaporSettingsDoc" },
+      "description": "Global rapor header and signatory settings."
+    },
+    "/raporStatuses/{nisn}": {
+      "schema": { "$ref": "#/entities/RaporPrintStatusDoc" },
+      "description": "Admin-only rapor print status per student."
+    },
+    "/raporLogs/{logId}": {
+      "schema": { "$ref": "#/entities/RaporPrintBatchLogDoc" },
+      "description": "Admin-only batch report print and PDF download logs."
+    },
+    "/publicReports/{nisn}": {
+      "schema": { "$ref": "#/entities/PublicReportDoc" },
+      "description": "Exact-NISN parent lookup report summary (get-only, no list)."
+    }
+  }
+}

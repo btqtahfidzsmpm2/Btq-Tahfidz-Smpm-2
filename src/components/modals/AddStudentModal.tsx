@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Student } from '../../types';
 import { storage } from '../../services/storage';
+import { cloudDb } from '../../services/cloudDb';
 import { TEACHERS_LIST, HOMEROOM_CLASSES } from '../../data/initialData';
 import { X, UserPlus, Edit3 } from 'lucide-react';
 
@@ -60,7 +61,7 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({
 
   if (!isOpen) return null;
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!nisn.trim() || !nama.trim()) {
       onNotify('error', 'Data Belum Lengkap', 'NISN dan Nama Siswa wajib diisi.');
@@ -80,6 +81,14 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({
         isTahfidz,
         targetJuz: isTahfidz ? targetJuz : undefined
       });
+      const updated = storage.getStudents().find(s => s.nisn === studentToEdit.nisn);
+      if (updated && cloudDb.isCloudAuthenticated()) {
+        try {
+          await cloudDb.syncStudentsBatch([updated], cloudDb.getCachedStaffDirectory(), true);
+        } catch (err: any) {
+          onNotify('error', 'Gagal Sinkron Cloud', err?.message || 'Periksa izin Firestore.');
+        }
+      }
       onNotify('success', 'Data Siswa Diperbarui', `Informasi ${nama.toUpperCase()} berhasil diperbarui secara real time.`);
       onSuccess();
     } else {
@@ -120,6 +129,14 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({
         },
         kehadiranPersen: 100
       });
+
+      if (cloudDb.isCloudAuthenticated()) {
+        try {
+          await cloudDb.syncStudentsBatch([newStudent], cloudDb.getCachedStaffDirectory(), false);
+        } catch (err: any) {
+          onNotify('error', 'Gagal Sinkron Cloud', err?.message || 'Periksa izin Firestore.');
+        }
+      }
 
       onNotify('success', 'Siswa Baru Ditambahkan', `${nama} (${kelas}) berhasil didaftarkan ke sistem.`);
       onSuccess(newStudent);

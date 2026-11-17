@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Student, BacaanRecord, TahfidzRecord, AbsensiRecord } from '../types';
-import { Search, BookOpen, Award, CheckCircle2, User } from 'lucide-react';
+import { cloudDb } from '../services/cloudDb';
+import { Search, BookOpen, Award, CheckCircle2, User, Loader2 } from 'lucide-react';
 
 interface PublicPortalProps {
   students: Student[];
@@ -23,28 +24,55 @@ export const PublicPortal: React.FC<PublicPortalProps> = ({
 }) => {
   const [query, setQuery] = useState('');
   const [activeTab, setActiveTab] = useState<'bacaan' | 'tahfidz' | 'absensi'>('bacaan');
+  const [isSearching, setIsSearching] = useState(false);
 
-  const handleSearch = (customQuery?: string) => {
-    const q = (customQuery ?? query).trim().toLowerCase();
+  const handleSearch = async (customQuery?: string) => {
+    const raw = (customQuery ?? query).trim();
+    const q = raw.toLowerCase();
     if (!q) {
-      onNotify('info', 'Masukkan NISN atau Nama Siswa', 'Silakan ketik nomor NISN atau nama lengkap anak.');
+      onNotify('info', 'Masukkan NISN Siswa', 'Silakan ketik 10 digit nomor NISN putra-putri Anda.');
       return;
     }
 
-    const found = students.find(
+    const foundLocal = students.find(
       s => s.nisn.toLowerCase() === q || s.nama.toLowerCase().includes(q)
     );
 
-    if (found) {
-      onSelectStudent(found);
-      onNotify('success', 'Data Siswa Ditemukan', `Menampilkan laporan untuk ${found.nama}`);
-    } else {
-      onNotify(
-        'error',
-        'Data Tidak Ditemukan',
-        `Siswa dengan kata kunci "${query}" tidak ditemukan di database SMP Muhammadiyah 2 Surabaya.`
-      );
+    if (foundLocal) {
+      onSelectStudent(foundLocal);
+      onNotify('success', 'Data Siswa Ditemukan', `Menampilkan laporan untuk ${foundLocal.nama}`);
+      return;
     }
+
+    // Online lookup by exact NISN via /publicReports/{nisn}
+    const cleanNisnCandidate = raw.replace(/\s+/g, '');
+    if (/^[a-zA-Z0-9_-]{4,40}$/.test(cleanNisnCandidate)) {
+      setIsSearching(true);
+      try {
+        const cloudStudent = await cloudDb.fetchPublicStudentByNisn(cleanNisnCandidate);
+        if (cloudStudent) {
+          onSelectStudent(cloudStudent);
+          onNotify(
+            'success',
+            'Data Cloud Ditemukan',
+            `Menampilkan laporan terbaru untuk ${cloudStudent.nama}.`
+          );
+          return;
+        }
+      } catch {
+        // Fallback to not found message below
+      } finally {
+        setIsSearching(false);
+      }
+    }
+
+    onNotify(
+      'error',
+      'Data Tidak Ditemukan',
+      students.length === 0
+        ? `Nomor NISN "${raw}" tidak ditemukan di Cloud. Pastikan Anda memasukkan 10 digit NISN siswa secara tepat.`
+        : `Siswa dengan kata kunci "${raw}" tidak ditemukan di database SMP Muhammadiyah 2 Surabaya.`
+    );
   };
 
   const studentBacaan = selectedStudent
@@ -85,7 +113,7 @@ export const PublicPortal: React.FC<PublicPortalProps> = ({
             Pantau Mutaba'ah Tilawati & Tahfidz Ananda
           </h1>
           <p className="text-emerald-100 text-xs sm:text-sm max-w-xl mx-auto leading-relaxed">
-            Periksa pencapaian mengaji harian, setoran hafalan Qur'an, kehadiran halaqah, dan hasil tes kenaikan tingkat cukup dengan nomor NISN atau nama anak.
+            Periksa pencapaian mengaji harian, setoran hafalan Qur'an, kehadiran halaqah, dan hasil tes kenaikan tingkat cukup dengan nomor NISN anak.
           </p>
 
           {/* Search Box */}
@@ -96,7 +124,7 @@ export const PublicPortal: React.FC<PublicPortalProps> = ({
                 value={query}
                 onChange={e => setQuery(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && handleSearch()}
-                placeholder="Ketik 10 digit NISN atau nama siswa..."
+                placeholder="Ketik 10 digit NISN siswa..."
                 className="w-full pl-4 pr-10 py-3 rounded-l-2xl text-slate-800 font-semibold focus:outline-none focus:ring-2 focus:ring-amber-400 text-xs sm:text-sm bg-white"
               />
               {query && (
@@ -110,10 +138,15 @@ export const PublicPortal: React.FC<PublicPortalProps> = ({
             </div>
             <button
               onClick={() => handleSearch()}
-              className="bg-amber-400 hover:bg-amber-500 text-slate-900 font-bold px-6 rounded-r-2xl text-xs sm:text-sm transition-colors flex items-center gap-1.5 shadow-sm"
+              disabled={isSearching}
+              className="bg-amber-400 hover:bg-amber-500 disabled:bg-amber-300 text-slate-900 font-bold px-6 rounded-r-2xl text-xs sm:text-sm transition-colors flex items-center gap-1.5 shadow-sm"
             >
-              <Search className="w-4 h-4" />
-              <span>Cari</span>
+              {isSearching ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Search className="w-4 h-4" />
+              )}
+              <span>{isSearching ? 'Mencari...' : 'Cari'}</span>
             </button>
           </div>
 
@@ -125,7 +158,7 @@ export const PublicPortal: React.FC<PublicPortalProps> = ({
               </span>
             ) : (
               <span className="text-emerald-100/90">
-                Data siswa belum diimpor. Silakan login sebagai <strong>Admin</strong> dan gunakan menu <strong>Import Format Data</strong> untuk mengisi database siswa & pengajar.
+                Portal Cloud Online Aktif — Wali murid dapat langsung memasukkan <strong>10 digit NISN</strong> anak untuk melihat capaian terbaru, atau <strong>Login Petugas</strong> untuk mengelola data.
               </span>
             )}
           </div>

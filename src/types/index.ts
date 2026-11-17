@@ -9,6 +9,9 @@ export interface UserSession {
   username: string;
   role: Role;
   nama: string;
+  email?: string;
+  authUid?: string;
+  authProvider?: 'google' | 'local';
   assignedGroup?: string; // For guru_ngaji (Kelas BTQ, can hold 2+ classes separated by , or &)
   assignedTahfidzGroup?: string; // For guru_tahfidz (Halaqah / Kelas Tahfidz)
   assignedClass?: string; // For wali_kelas (e.g., "7D" or "7A")
@@ -23,6 +26,7 @@ export interface UserAccount {
   salt: string;
   role: Role;
   nama: string;
+  email?: string;
   teacherId?: string;
   assignedGroup?: string;
   assignedTahfidzGroup?: string;
@@ -60,6 +64,16 @@ export interface Teacher {
   kelompokTahfidz?: string;
   ruangan: string;
   kontak?: string;
+  email?: string;
+}
+
+export interface AccessRequest {
+  uid: string;
+  email: string;
+  nama: string;
+  requestedRole: 'guru_ngaji' | 'guru_tahfidz' | 'wali_kelas';
+  requestedNote: string;
+  status: 'pending' | 'approved' | 'rejected';
 }
 
 export interface UjianRecord {

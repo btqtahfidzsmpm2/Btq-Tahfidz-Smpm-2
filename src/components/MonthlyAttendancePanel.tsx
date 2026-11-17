@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { AbsensiRecord, Student, UserSession } from '../types';
 import { storage } from '../services/storage';
+import { cloudDb } from '../services/cloudDb';
 import { detectBtqClassGender, isValidBtqClass } from '../utils/access';
 import {
   computeStudentAttendanceSummary,
@@ -288,8 +289,32 @@ export const MonthlyAttendancePanel: React.FC<MonthlyAttendancePanelProps> = ({
 
     if (nextStatus === null) {
       storage.deleteAttendanceEntry(student.nisn, targetSesi, dateStr);
+      if (cloudDb.isCloudAuthenticated()) {
+        const updatedStudent = storage.getStudents().find(s => s.nisn === student.nisn);
+        const recId = existing?.id || `${student.nisn}_${dateStr}_${targetSesi}`;
+        cloudDb.deleteAbsensiEntryCloud(recId, updatedStudent).catch(err => {
+          onNotify('error', 'Gagal Sinkron Cloud', err?.message || 'Periksa izin Firestore.');
+        });
+      }
     } else {
       storage.saveAttendanceBatch([{ nisn: student.nisn, status: nextStatus }], targetSesi, dateStr);
+      if (cloudDb.isCloudAuthenticated()) {
+        const updatedStudent = storage.getStudents().find(s => s.nisn === student.nisn);
+        const savedRec = storage
+          .getAbsensi()
+          .find(a => a.nisn === student.nisn && a.tanggal === dateStr && a.sesi === targetSesi);
+        if (savedRec) {
+          cloudDb
+            .saveAbsensiBatchCloud(
+              [savedRec],
+              updatedStudent ? [updatedStudent] : [],
+              cloudDb.getCachedStaffDirectory()
+            )
+            .catch(err => {
+              onNotify('error', 'Gagal Sinkron Cloud', err?.message || 'Periksa izin Firestore.');
+            });
+        }
+      }
     }
     onDataUpdated();
   };
