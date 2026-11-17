@@ -199,7 +199,9 @@ export function getAuthorizedTahfidzStudents(
 export function getAuthorizedStudents(user: UserSession, students: Student[]): Student[] {
   if (user.role === 'admin') return students;
   if (user.role === 'wali_kelas') {
-    return students.filter(s => s.kelas === (user.assignedClass || '7D'));
+    const targetClass = (user.assignedClass || '').trim().toUpperCase();
+    if (!targetClass) return [];
+    return students.filter(s => (s.kelas || '').trim().toUpperCase() === targetClass);
   }
   if (user.role === 'guru_ngaji') {
     return getAuthorizedNgajiStudents(user, students);

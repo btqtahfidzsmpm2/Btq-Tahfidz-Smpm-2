@@ -396,100 +396,108 @@ export default function App() {
             }}
             onNotify={addToast}
           />
-          <InputBacaanModal
-            isOpen={showBacaanModal}
-            onClose={() => {
-              setShowBacaanModal(false);
-              setModalTargetStudent(undefined);
-            }}
-            students={getAuthorizedNgajiStudents(user, students)}
-            initialStudent={modalTargetStudent}
-            user={user}
-            onSuccess={reloadData}
-            onNotify={addToast}
-          />
+          {user.role !== 'wali_kelas' && (
+            <>
+              <InputBacaanModal
+                isOpen={showBacaanModal}
+                onClose={() => {
+                  setShowBacaanModal(false);
+                  setModalTargetStudent(undefined);
+                }}
+                students={getAuthorizedNgajiStudents(user, students)}
+                initialStudent={modalTargetStudent}
+                user={user}
+                onSuccess={reloadData}
+                onNotify={addToast}
+              />
 
-          <InputTahfidzModal
-            isOpen={showTahfidzModal}
-            onClose={() => {
-              setShowTahfidzModal(false);
-              setModalTargetStudent(undefined);
-            }}
-            students={getAuthorizedTahfidzStudents(user, students)}
-            initialStudent={modalTargetStudent}
-            user={user}
-            onSuccess={reloadData}
-            onNotify={addToast}
-          />
+              <InputTahfidzModal
+                isOpen={showTahfidzModal}
+                onClose={() => {
+                  setShowTahfidzModal(false);
+                  setModalTargetStudent(undefined);
+                }}
+                students={getAuthorizedTahfidzStudents(user, students)}
+                initialStudent={modalTargetStudent}
+                user={user}
+                onSuccess={reloadData}
+                onNotify={addToast}
+              />
 
-          <InputUjianModal
-            isOpen={showUjianModal}
-            onClose={() => {
-              setShowUjianModal(false);
-              setModalTargetStudent(undefined);
-            }}
-            students={getAuthorizedStudents(user, students)}
-            initialStudent={modalTargetStudent}
-            onSuccess={reloadData}
-            onNotify={addToast}
-          />
+              <InputUjianModal
+                isOpen={showUjianModal}
+                onClose={() => {
+                  setShowUjianModal(false);
+                  setModalTargetStudent(undefined);
+                }}
+                students={getAuthorizedStudents(user, students)}
+                initialStudent={modalTargetStudent}
+                onSuccess={reloadData}
+                onNotify={addToast}
+              />
 
-          <PresensiModal
-            isOpen={showPresensiModal}
-            onClose={() => setShowPresensiModal(false)}
-            user={user}
-            students={getAuthorizedStudents(user, students)}
-            onSuccess={reloadData}
-            onNotify={addToast}
-          />
+              <PresensiModal
+                isOpen={showPresensiModal}
+                onClose={() => setShowPresensiModal(false)}
+                user={user}
+                students={getAuthorizedStudents(user, students)}
+                onSuccess={reloadData}
+                onNotify={addToast}
+              />
+            </>
+          )}
 
-          <AddStudentModal
-            isOpen={showAddStudentModal}
-            studentToEdit={studentToEdit}
-            teachersList={teachers.map(t => t.nama)}
-            onClose={() => {
-              setShowAddStudentModal(false);
-              setStudentToEdit(null);
-            }}
-            onSuccess={() => reloadData()}
-            onNotify={addToast}
-          />
+          {user.role === 'admin' && (
+            <>
+              <AddStudentModal
+                isOpen={showAddStudentModal}
+                studentToEdit={studentToEdit}
+                teachersList={teachers.map(t => t.nama)}
+                onClose={() => {
+                  setShowAddStudentModal(false);
+                  setStudentToEdit(null);
+                }}
+                onSuccess={() => reloadData()}
+                onNotify={addToast}
+              />
 
-          <ImportDataModal
-            isOpen={showImportModal}
-            onClose={() => setShowImportModal(false)}
-            onSuccess={() => reloadData()}
-            onNotify={addToast}
-          />
+              <ImportDataModal
+                isOpen={showImportModal}
+                onClose={() => setShowImportModal(false)}
+                onSuccess={() => reloadData()}
+                onNotify={addToast}
+              />
 
-          <TeacherModal
-            isOpen={showTeacherModal}
-            teacherToEdit={teacherToEdit}
-            onClose={() => {
-              setShowTeacherModal(false);
-              setTeacherToEdit(null);
-            }}
-            onSuccess={() => reloadData()}
-            onNotify={addToast}
-          />
+              <TeacherModal
+                isOpen={showTeacherModal}
+                teacherToEdit={teacherToEdit}
+                onClose={() => {
+                  setShowTeacherModal(false);
+                  setTeacherToEdit(null);
+                }}
+                onSuccess={() => reloadData()}
+                onNotify={addToast}
+              />
 
-          <ConfirmDeleteModal
-            isOpen={showDeleteConfirm}
-            onClose={() => {
-              setShowDeleteConfirm(false);
-              setDeleteTarget(null);
-            }}
-            onConfirm={handleConfirmDelete}
-            title={
-              deleteTarget?.type === 'Semua Data'
-                ? 'Kosongkan Semua Data'
-                : deleteTarget?.type === 'Siswa'
-                ? 'Hapus Data Siswa'
-                : 'Hapus Guru Pengajar'
-            }
-            itemName={deleteTarget?.name || ''}
-            itemType={deleteTarget?.type || 'Siswa'}
-          />
+              <ConfirmDeleteModal
+                isOpen={showDeleteConfirm}
+                onClose={() => {
+                  setShowDeleteConfirm(false);
+                  setDeleteTarget(null);
+                }}
+                onConfirm={handleConfirmDelete}
+                title={
+                  deleteTarget?.type === 'Semua Data'
+                    ? 'Kosongkan Semua Data'
+                    : deleteTarget?.type === 'Siswa'
+                    ? 'Hapus Data Siswa'
+                    : 'Hapus Guru Pengajar'
+                }
+                itemName={deleteTarget?.name || ''}
+                itemType={deleteTarget?.type || 'Siswa'}
+              />
+            </>
+          )}
         </>
       )}
 

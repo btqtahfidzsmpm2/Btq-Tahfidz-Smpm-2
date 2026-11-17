@@ -12,6 +12,7 @@ import {
 import { BatchEvaluationTable } from './BatchEvaluationTable';
 import { AccountSecurityPanel } from './AccountSecurityPanel';
 import { ReportCenterPanel } from './ReportCenterPanel';
+import { MonthlyAttendancePanel } from './MonthlyAttendancePanel';
 import { storage } from '../services/storage';
 import { downloadRaporPdf } from '../services/raporPdf';
 import {
@@ -24,6 +25,11 @@ import {
   isValidBtqClass,
   matchesTeacherName
 } from '../utils/access';
+import {
+  computeStudentAttendanceSummary,
+  getCurrentMonthStr,
+  StudentAttendanceSummary
+} from '../utils/attendance';
 import {
   Users,
   BookOpen,
@@ -48,7 +54,8 @@ import {
   KeyRound,
   AlertTriangle,
   Printer,
-  FileDown
+  FileDown,
+  CalendarDays
 } from 'lucide-react';
 
 interface TeacherDashboardProps {
@@ -110,14 +117,16 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   onDataUpdated,
   onNotify
 }) => {
-  // Admin sub-menu tab: 'siswa' | 'penilaian' | 'rapor' | 'guru' | 'keamanan'
-  const [adminTab, setAdminTab] = useState<'siswa' | 'penilaian' | 'rapor' | 'guru' | 'keamanan'>('siswa');
+  // Admin sub-menu tab: 'siswa' | 'penilaian' | 'absensi' | 'rapor' | 'guru' | 'keamanan'
+  const [adminTab, setAdminTab] = useState<'siswa' | 'penilaian' | 'absensi' | 'rapor' | 'guru' | 'keamanan'>('siswa');
   const [preselectedPrintNisn, setPreselectedPrintNisn] = useState<string | null>(null);
 
-  // Guru Ngaji tab: 'tabel' | 'list'
-  const [guruNgajiTab, setGuruNgajiTab] = useState<'tabel' | 'list'>('tabel');
-  // Guru Tahfidz tab: 'setoran' | 'list'
-  const [guruTahfidzTab, setGuruTahfidzTab] = useState<'setoran' | 'list'>('setoran');
+  // Guru Ngaji tab: 'tabel' | 'absensi' | 'list'
+  const [guruNgajiTab, setGuruNgajiTab] = useState<'tabel' | 'absensi' | 'list'>('tabel');
+  // Guru Tahfidz tab: 'setoran' | 'absensi' | 'list'
+  const [guruTahfidzTab, setGuruTahfidzTab] = useState<'setoran' | 'absensi' | 'list'>('setoran');
+  // Wali Kelas tab: 'list' | 'absensi'
+  const [waliKelasTab, setWaliKelasTab] = useState<'list' | 'absensi'>('list');
   const [tahfidzSearch, setTahfidzSearch] = useState<string>('');
 
   // Filters for Students
@@ -126,6 +135,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   const [filterBtqGender, setFilterBtqGender] = useState<'' | 'PI' | 'PA'>('');
   const [filterProgram, setFilterProgram] = useState<'' | 'btq' | 'tahfidz' | 'non_tahfidz'>('');
   const [filterGender, setFilterGender] = useState<string>('');
+  const [onlyFrequentAbsent, setOnlyFrequentAbsent] = useState<boolean>(false);
   const [searchTerm, setSearchTerm] = useState<string>('');
 
   // Filters for Teachers
@@ -179,6 +189,28 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
     };
   }, [user.role, students, authorizedStudents]);
 
+  // Monthly attendance summary & frequent-absence flags for current month
+  const currentMonth = getCurrentMonthStr();
+  const monthlySummaryMap = useMemo(() => {
+    const map = new Map<string, StudentAttendanceSummary>();
+    const sesiScope: 'all' | 'btq' | 'tahfidz' =
+      user.role === 'guru_ngaji'
+        ? 'btq'
+        : user.role === 'guru_tahfidz'
+        ? 'tahfidz'
+        : 'all';
+    authorizedStudents.forEach(s => {
+      map.set(
+        s.nisn,
+        computeStudentAttendanceSummary(s, absensiList, {
+          monthPrefix: currentMonth,
+          sesi: sesiScope
+        })
+      );
+    });
+    return map;
+  }, [authorizedStudents, absensiList, currentMonth, user.role]);
+
   // Combined search and sub-filters for Students
   const filteredStudents = useMemo(() => {
     return authorizedStudents.filter(s => {
@@ -207,6 +239,9 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
           ? !s.isTahfidz
           : true;
       const matchGender = filterGender ? s.gender === filterGender : true;
+      const matchAbsent = onlyFrequentAbsent
+        ? (monthlySummaryMap.get(s.nisn)?.flagLevel || 'aman') !== 'aman'
+        : true;
 
       return (
         matchSearch &&
@@ -214,7 +249,8 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
         matchBTQ &&
         matchBtqGender &&
         matchProgram &&
-        matchGender
+        matchGender &&
+        matchAbsent
       );
     });
   }, [
@@ -224,7 +260,9 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
     filterBTQ,
     filterBtqGender,
     filterProgram,
-    filterGender
+    filterGender,
+    onlyFrequentAbsent,
+    monthlySummaryMap
   ]);
 
   // Filtered Teachers
@@ -251,11 +289,14 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
       s => s.ujian.predikat === 'MUMTAZ' || s.ujian.nilai >= 85
     ).length;
     const avgAttendance = Math.round(
-      authorizedStudents.reduce((acc, curr) => acc + (curr.kehadiranPersen || 95), 0) / (total || 1)
+      authorizedStudents.reduce((acc, curr) => acc + (curr.kehadiranPersen ?? 100), 0) / (total || 1)
     );
+    const frequentAbsentCount = authorizedStudents.filter(
+      s => (monthlySummaryMap.get(s.nisn)?.flagLevel || 'aman') !== 'aman'
+    ).length;
 
-    return { total, tahfidzCount, mumtazCount, avgAttendance };
-  }, [authorizedStudents]);
+    return { total, tahfidzCount, mumtazCount, avgAttendance, frequentAbsentCount };
+  }, [authorizedStudents, monthlySummaryMap]);
 
   // Metrics for Teacher Management
   const teacherMetrics = useMemo(() => {
@@ -336,7 +377,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
       case 'guru_tahfidz':
         return `Guru Tahfidz (Program Tahfidz): Mengelola setoran hafalan Qur'an, tasmi juz, dan capaian santri pada halaqah ${user.assignedTahfidzGroup || user.assignedGroup || 'Tahfidz binaan Anda'}.`;
       case 'wali_kelas':
-        return `Wali Kelas ${user.assignedClass || 'Formal'}: Memantau rekap harian kehadiran dan pencapaian siswa perwalian Anda.`;
+        return `Wali Kelas ${user.assignedClass || 'Formal'} (Mode Pantau / Read-Only): Hanya melihat report capaian, kelas BTQ & Tahfidz, serta daftar absensi siswa kelas Anda tanpa hak mengubah atau menilai bacaan.`;
       default:
         return '';
     }
@@ -460,21 +501,25 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
             </button>
           )}
 
-          <button
-            onClick={() => onOpenUjianModal()}
-            className="px-3.5 py-2 text-xs font-bold text-white bg-purple-700 hover:bg-purple-800 rounded-xl transition-colors shadow-2xs flex items-center gap-1.5"
-          >
-            <GraduationCap className="w-3.5 h-3.5" />
-            <span>Update Nilai Ujian</span>
-          </button>
+          {user.role !== 'wali_kelas' && (
+            <>
+              <button
+                onClick={() => onOpenUjianModal()}
+                className="px-3.5 py-2 text-xs font-bold text-white bg-purple-700 hover:bg-purple-800 rounded-xl transition-colors shadow-2xs flex items-center gap-1.5"
+              >
+                <GraduationCap className="w-3.5 h-3.5" />
+                <span>Update Nilai Ujian</span>
+              </button>
 
-          <button
-            onClick={onOpenPresensiModal}
-            className="px-3.5 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl transition-colors shadow-2xs flex items-center gap-1.5"
-          >
-            <ClipboardCheck className="w-3.5 h-3.5" />
-            <span>Presensi Harian</span>
-          </button>
+              <button
+                onClick={onOpenPresensiModal}
+                className="px-3.5 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl transition-colors shadow-2xs flex items-center gap-1.5"
+              >
+                <ClipboardCheck className="w-3.5 h-3.5" />
+                <span>Presensi Harian</span>
+              </button>
+            </>
+          )}
         </div>
       </section>
 
@@ -494,6 +539,23 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
             <span className="text-[10px] bg-emerald-700 text-white px-1.5 py-0.5 rounded font-mono font-semibold">
               ⚡ Mode Cepat
             </span>
+          </button>
+
+          <button
+            onClick={() => setGuruNgajiTab('absensi')}
+            className={`px-4 py-2 text-xs font-bold rounded-xl transition-colors flex items-center gap-2 ${
+              guruNgajiTab === 'absensi'
+                ? 'bg-blue-700 text-white shadow-2xs'
+                : 'bg-white text-slate-600 hover:bg-slate-50 border border-slate-200'
+            }`}
+          >
+            <CalendarDays className="w-4 h-4" />
+            <span>Daftar Absensi 1 Bulan</span>
+            {metrics.frequentAbsentCount > 0 && (
+              <span className="px-1.5 py-0.5 rounded bg-rose-600 text-white text-[10px] font-mono font-bold">
+                {metrics.frequentAbsentCount} Sering Absen
+              </span>
+            )}
           </button>
 
           <button
@@ -526,6 +588,23 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
           </button>
 
           <button
+            onClick={() => setGuruTahfidzTab('absensi')}
+            className={`px-4 py-2 text-xs font-bold rounded-xl transition-colors flex items-center gap-2 ${
+              guruTahfidzTab === 'absensi'
+                ? 'bg-blue-700 text-white shadow-2xs'
+                : 'bg-white text-slate-600 hover:bg-slate-50 border border-slate-200'
+            }`}
+          >
+            <CalendarDays className="w-4 h-4" />
+            <span>Daftar Absensi 1 Bulan</span>
+            {metrics.frequentAbsentCount > 0 && (
+              <span className="px-1.5 py-0.5 rounded bg-rose-600 text-white text-[10px] font-mono font-bold">
+                {metrics.frequentAbsentCount} Sering Absen
+              </span>
+            )}
+          </button>
+
+          <button
             onClick={() => setGuruTahfidzTab('list')}
             className={`px-4 py-2 text-xs font-bold rounded-xl transition-colors flex items-center gap-2 ${
               guruTahfidzTab === 'list'
@@ -535,6 +614,40 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
           >
             <Users className="w-4 h-4" />
             <span>Ringkasan & Rapor Santri Tahfidz ({tahfidzStudents.length})</span>
+          </button>
+        </div>
+      )}
+
+      {/* WALI KELAS SUB-MENU TABS */}
+      {user.role === 'wali_kelas' && (
+        <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 pb-2">
+          <button
+            onClick={() => setWaliKelasTab('list')}
+            className={`px-4 py-2 text-xs font-bold rounded-xl transition-colors flex items-center gap-2 ${
+              waliKelasTab === 'list'
+                ? 'bg-emerald-800 text-white shadow-2xs'
+                : 'bg-white text-slate-600 hover:bg-slate-50 border border-slate-200'
+            }`}
+          >
+            <Users className="w-4 h-4" />
+            <span>Report &amp; Kelas BTQ/Tahfidz Siswa {user.assignedClass || ''} ({authorizedStudents.length})</span>
+          </button>
+
+          <button
+            onClick={() => setWaliKelasTab('absensi')}
+            className={`px-4 py-2 text-xs font-bold rounded-xl transition-colors flex items-center gap-2 ${
+              waliKelasTab === 'absensi'
+                ? 'bg-blue-700 text-white shadow-2xs'
+                : 'bg-white text-slate-600 hover:bg-slate-50 border border-slate-200'
+            }`}
+          >
+            <CalendarDays className="w-4 h-4" />
+            <span>Daftar Absensi 1 Bulan</span>
+            {metrics.frequentAbsentCount > 0 && (
+              <span className="px-1.5 py-0.5 rounded bg-rose-600 text-white text-[10px] font-mono font-bold">
+                {metrics.frequentAbsentCount} Sering Absen
+              </span>
+            )}
           </button>
         </div>
       )}
@@ -568,6 +681,23 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
               <span className="text-[10px] bg-emerald-700 text-white px-1.5 py-0.5 rounded font-mono font-semibold">
                 ⚡ Mode Cepat
               </span>
+            </button>
+
+            <button
+              onClick={() => setAdminTab('absensi')}
+              className={`px-4 py-2 text-xs font-bold rounded-xl transition-colors flex items-center gap-2 ${
+                adminTab === 'absensi'
+                  ? 'bg-blue-700 text-white shadow-2xs'
+                  : 'bg-white text-slate-600 hover:bg-slate-50 border border-slate-200'
+              }`}
+            >
+              <CalendarDays className="w-4 h-4" />
+              <span>Daftar Absensi 1 Bulan</span>
+              {metrics.frequentAbsentCount > 0 && (
+                <span className="px-1.5 py-0.5 rounded bg-rose-600 text-white text-[10px] font-mono font-bold">
+                  {metrics.frequentAbsentCount} Sering Absen
+                </span>
+              )}
             </button>
 
             <button
@@ -631,6 +761,27 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
             )}
           </div>
         </div>
+      )}
+
+      {/* VIEW 0B: DAFTAR ABSENSI KEHADIRAN 1 BULAN (TERSEDIA DI SETIAP DASHBOARD PETUGAS) */}
+      {((user.role === 'admin' && adminTab === 'absensi') ||
+        (user.role === 'guru_ngaji' && guruNgajiTab === 'absensi') ||
+        (user.role === 'guru_tahfidz' && guruTahfidzTab === 'absensi') ||
+        (user.role === 'wali_kelas' && waliKelasTab === 'absensi')) && (
+        <MonthlyAttendancePanel
+          user={user}
+          students={
+            user.role === 'guru_ngaji'
+              ? ngajiStudents
+              : user.role === 'guru_tahfidz'
+              ? tahfidzStudents
+              : authorizedStudents
+          }
+          absensiList={absensiList}
+          onOpenPresensiModal={onOpenPresensiModal}
+          onDataUpdated={onDataUpdated}
+          onNotify={onNotify}
+        />
       )}
 
       {/* VIEW 0: KELOLA AKUN & KEAMANAN LOGIN (ADMIN ONLY) */}
@@ -778,7 +929,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
       {(((user.role === 'admin' && adminTab === 'siswa') ||
         (user.role === 'guru_ngaji' && guruNgajiTab === 'list') ||
         (user.role === 'guru_tahfidz' && guruTahfidzTab === 'list') ||
-        user.role === 'wali_kelas')) && (
+        (user.role === 'wali_kelas' && waliKelasTab === 'list'))) && (
         <>
           {/* 4 Metric Cards */}
           <section className="grid grid-cols-2 lg:grid-cols-4 gap-4">
@@ -821,17 +972,47 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
               </span>
             </div>
 
-            <div className="p-4 rounded-xl bg-white border border-slate-200">
+            <div
+              className={`p-4 rounded-xl border ${
+                metrics.frequentAbsentCount > 0
+                  ? 'bg-rose-50/70 border-rose-200'
+                  : 'bg-white border-slate-200'
+              }`}
+            >
               <div className="flex items-center justify-between text-slate-500 mb-1">
-                <span className="text-xs font-medium">Presensi Rata-rata</span>
-                <ClipboardCheck className="w-4 h-4 text-blue-600" />
+                <span className="text-xs font-medium">Presensi &amp; Pantauan Absen</span>
+                <ClipboardCheck
+                  className={`w-4 h-4 ${
+                    metrics.frequentAbsentCount > 0 ? 'text-rose-600' : 'text-blue-600'
+                  }`}
+                />
               </div>
-              <span className="text-2xl font-black text-blue-700 font-mono tabular-nums">
-                {metrics.avgAttendance}%
-              </span>
-              <span className="text-[11px] text-slate-400 block mt-0.5">
-                Kehadiran mengaji & halaqah
-              </span>
+              <div className="flex items-baseline gap-2">
+                <span className="text-2xl font-black text-blue-700 font-mono tabular-nums">
+                  {metrics.avgAttendance}%
+                </span>
+                {metrics.frequentAbsentCount > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setOnlyFrequentAbsent(prev => !prev)}
+                    className="px-2 py-0.5 rounded-md bg-rose-600 hover:bg-rose-700 text-white text-[10px] font-bold"
+                  >
+                    {metrics.frequentAbsentCount} Sering Absen
+                  </button>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  if (user.role === 'admin') setAdminTab('absensi');
+                  else if (user.role === 'guru_ngaji') setGuruNgajiTab('absensi');
+                  else if (user.role === 'guru_tahfidz') setGuruTahfidzTab('absensi');
+                  else if (user.role === 'wali_kelas') setWaliKelasTab('absensi');
+                }}
+                className="text-[11px] text-blue-700 hover:underline font-semibold block mt-0.5 text-left"
+              >
+                Buka Daftar Absensi 1 Bulan &rarr;
+              </button>
             </div>
           </section>
 
@@ -847,34 +1028,36 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                   <span>Filter:</span>
                 </div>
 
-                {/* Filter Formal Class */}
-                <select
-                  value={filterClass}
-                  onChange={e => setFilterClass(e.target.value)}
-                  className="px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs bg-white text-slate-700 font-medium focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                >
-                  <option value="">Semua Kelas Formal</option>
-                  <option value="7D">7D (Putri)</option>
-                  <option value="7E">7E (Putri)</option>
-                  <option value="7F">7F (Putri)</option>
-                  <option value="7A">7A (Putra)</option>
-                  <option value="7B">7B (Putra)</option>
-                  <option value="7C">7C (Putra)</option>
-                  <option value="8E">8E (Putri)</option>
-                  <option value="8F">8F (Putri)</option>
-                  <option value="8G">8G (Putri)</option>
-                  <option value="8A">8A (Putra)</option>
-                  <option value="8B">8B (Putra)</option>
-                  <option value="8C">8C (Putra)</option>
-                  <option value="8D">8D (Putra)</option>
-                  <option value="9E">9E (Putri)</option>
-                  <option value="9F">9F (Putri)</option>
-                  <option value="9G">9G (Putri)</option>
-                  <option value="9A">9A (Putra)</option>
-                  <option value="9B">9B (Putra)</option>
-                  <option value="9C">9C (Putra)</option>
-                  <option value="9D">9D (Putra)</option>
-                </select>
+                {/* Filter Formal Class (Disembunyikan untuk Wali Kelas karena khusus 1 kelas perwaliannya) */}
+                {user.role !== 'wali_kelas' && (
+                  <select
+                    value={filterClass}
+                    onChange={e => setFilterClass(e.target.value)}
+                    className="px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs bg-white text-slate-700 font-medium focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                  >
+                    <option value="">Semua Kelas Formal</option>
+                    <option value="7D">7D (Putri)</option>
+                    <option value="7E">7E (Putri)</option>
+                    <option value="7F">7F (Putri)</option>
+                    <option value="7A">7A (Putra)</option>
+                    <option value="7B">7B (Putra)</option>
+                    <option value="7C">7C (Putra)</option>
+                    <option value="8E">8E (Putri)</option>
+                    <option value="8F">8F (Putri)</option>
+                    <option value="8G">8G (Putri)</option>
+                    <option value="8A">8A (Putra)</option>
+                    <option value="8B">8B (Putra)</option>
+                    <option value="8C">8C (Putra)</option>
+                    <option value="8D">8D (Putra)</option>
+                    <option value="9E">9E (Putri)</option>
+                    <option value="9F">9F (Putri)</option>
+                    <option value="9G">9G (Putri)</option>
+                    <option value="9A">9A (Putra)</option>
+                    <option value="9B">9B (Putra)</option>
+                    <option value="9C">9C (Putra)</option>
+                    <option value="9D">9D (Putra)</option>
+                  </select>
+                )}
 
                 {/* Filter Kategori BTQ Putri (PI) vs Putra (PA) */}
                 {user.role !== 'guru_tahfidz' && (
@@ -944,7 +1127,21 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                   <option value="L">Santri Putra</option>
                 </select>
 
-                {(filterClass || filterBTQ || filterBtqGender || filterProgram || filterGender || searchTerm) && (
+                {/* Toggle Filter Siswa Sering Tidak Masuk */}
+                <button
+                  type="button"
+                  onClick={() => setOnlyFrequentAbsent(prev => !prev)}
+                  className={`px-2.5 py-1.5 rounded-lg text-xs font-bold border transition-colors flex items-center gap-1 ${
+                    onlyFrequentAbsent
+                      ? 'bg-rose-600 text-white border-rose-600'
+                      : 'bg-white text-rose-700 border-rose-200 hover:bg-rose-50'
+                  }`}
+                >
+                  <AlertTriangle className="w-3.5 h-3.5" />
+                  <span>Sering Tidak Masuk ({metrics.frequentAbsentCount})</span>
+                </button>
+
+                {(filterClass || filterBTQ || filterBtqGender || filterProgram || filterGender || onlyFrequentAbsent || searchTerm) && (
                   <button
                     onClick={() => {
                       setFilterClass('');
@@ -952,6 +1149,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                       setFilterBtqGender('');
                       setFilterProgram('');
                       setFilterGender('');
+                      setOnlyFrequentAbsent(false);
                       setSearchTerm('');
                     }}
                     className="text-xs text-rose-600 hover:text-rose-800 font-semibold px-2 py-1"
@@ -999,23 +1197,50 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                     <th className="p-3 whitespace-nowrap">Capaian Terakhir</th>
                     <th className="p-3 text-center whitespace-nowrap">Nilai Ujian</th>
                     <th className="p-3 text-center whitespace-nowrap">Hasil Tes</th>
-                    <th className="p-3 text-center whitespace-nowrap">Aksi Data</th>
+                    <th className="p-3 text-center whitespace-nowrap">
+                      {user.role === 'wali_kelas' ? 'Report Siswa' : 'Aksi Data'}
+                    </th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {filteredStudents.length > 0 ? (
-                    filteredStudents.map(student => (
-                      <tr key={student.id} className="hover:bg-slate-50/70 transition-colors">
+                    filteredStudents.map(student => {
+                      const attSum = monthlySummaryMap.get(student.nisn);
+                      const isFlagged = Boolean(attSum && attSum.flagLevel !== 'aman');
+                      return (
+                      <tr
+                        key={student.id}
+                        className={`transition-colors ${
+                          attSum?.flagLevel === 'kritis'
+                            ? 'bg-rose-50/60 hover:bg-rose-50'
+                            : attSum?.flagLevel === 'waspada'
+                            ? 'bg-amber-50/40 hover:bg-amber-50/70'
+                            : 'hover:bg-slate-50/70'
+                        }`}
+                      >
                         <td className="p-3 font-mono font-medium text-slate-500 whitespace-nowrap">
                           {student.nisn}
                         </td>
 
                         <td className="p-3 font-bold text-slate-900">
-                          <div className="flex items-center gap-1.5">
+                          <div className="flex items-center gap-1.5 flex-wrap">
                             <span>{student.nama}</span>
                             {student.isTahfidz && (
                               <span className="text-[10px] text-amber-700 font-bold" title="Peserta Program Tahfidz">
                                 ★ Tahfidz
+                              </span>
+                            )}
+                            {isFlagged && attSum && (
+                              <span
+                                className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-extrabold ${
+                                  attSum.flagLevel === 'kritis'
+                                    ? 'bg-rose-600 text-white'
+                                    : 'bg-amber-400 text-slate-950'
+                                }`}
+                                title={`Bulan ini: ${attSum.flagReason}`}
+                              >
+                                <AlertTriangle className="w-2.5 h-2.5" />
+                                <span>{attSum.flagLabel} ({attSum.flagReason})</span>
                               </span>
                             )}
                           </div>
@@ -1121,10 +1346,15 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                             {/* View Report */}
                             <button
                               onClick={() => onViewStudentReport(student)}
-                              className="p-1.5 text-slate-600 hover:text-emerald-700 hover:bg-emerald-50 rounded-lg transition-colors"
-                              title="Lihat Rapor Siswa"
+                              className={
+                                user.role === 'wali_kelas'
+                                  ? 'px-2.5 py-1 text-[11px] font-bold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-lg transition-colors flex items-center gap-1'
+                                  : 'p-1.5 text-slate-600 hover:text-emerald-700 hover:bg-emerald-50 rounded-lg transition-colors'
+                              }
+                              title="Lihat Report Siswa"
                             >
                               <Eye className="w-3.5 h-3.5" />
+                              {user.role === 'wali_kelas' && <span>Lihat Report</span>}
                             </button>
 
                             {/* Input Reading (Tilawati) - KHUSUS ADMIN & GURU NGAJI */}
@@ -1149,14 +1379,16 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                               </button>
                             )}
 
-                            {/* Update Exam */}
-                            <button
-                              onClick={() => onOpenUjianModal(student)}
-                              className="p-1.5 text-purple-700 hover:text-purple-900 hover:bg-purple-50 rounded-lg transition-colors"
-                              title="Perbarui Nilai Tes Kenaikan"
-                            >
-                              <Edit3 className="w-3.5 h-3.5" />
-                            </button>
+                            {/* Update Exam - TIDAK TERSEDIA UNTUK WALI KELAS */}
+                            {user.role !== 'wali_kelas' && (
+                              <button
+                                onClick={() => onOpenUjianModal(student)}
+                                className="p-1.5 text-purple-700 hover:text-purple-900 hover:bg-purple-50 rounded-lg transition-colors"
+                                title="Perbarui Nilai Tes Kenaikan"
+                              >
+                                <Edit3 className="w-3.5 h-3.5" />
+                              </button>
+                            )}
 
                             {/* ADMIN ONLY: DOWNLOAD PDF, CETAK RAPOR, EDIT & DELETE SISWA REAL TIME */}
                             {user.role === 'admin' && (
@@ -1201,7 +1433,8 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                           </div>
                         </td>
                       </tr>
-                    ))
+                      );
+                    })
                   ) : (
                     <tr>
                       <td colSpan={9} className="p-10 text-center text-slate-500">

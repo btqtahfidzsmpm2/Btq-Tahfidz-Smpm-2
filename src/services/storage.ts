@@ -224,6 +224,30 @@ export const storage = {
     return { savedCount: entries.length };
   },
 
+  deleteAttendanceEntry(
+    nisn: string,
+    sesi: 'btq' | 'tahfidz',
+    tanggal: string
+  ): void {
+    const absensiList = this.getAbsensi().filter(
+      a => !(a.nisn === nisn && a.tanggal === tanggal && a.sesi === sesi)
+    );
+    this.saveAbsensi(absensiList);
+
+    const students = this.getStudents();
+    const sIdx = students.findIndex(s => s.nisn === nisn);
+    if (sIdx !== -1) {
+      const studentAbs = absensiList.filter(a => a.nisn === nisn);
+      if (studentAbs.length > 0) {
+        const hadirCount = studentAbs.filter(a => a.status === 'Hadir').length;
+        students[sIdx].kehadiranPersen = Math.round((hadirCount / studentAbs.length) * 100);
+      } else {
+        students[sIdx].kehadiranPersen = 100;
+      }
+      this.saveStudents(students);
+    }
+  },
+
   addStudent(student: Omit<Student, 'id'>): Student {
     const students = this.getStudents();
     const normalizedBtq = isValidBtqClass(student.kelasBTQ)
