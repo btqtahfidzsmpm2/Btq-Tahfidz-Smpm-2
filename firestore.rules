@@ -32,7 +32,7 @@ service cloud.firestore {
 
     function isBootstrapAdmin() {
       return isVerifiedUser() &&
-        request.auth.token.email == 'btqtahfidzsmpm2@gmail.com';
+        request.auth.token.email.lower() == 'btqtahfidzsmpm2@gmail.com';
     }
 
     function isAdmin() {
@@ -330,8 +330,8 @@ service cloud.firestore {
 
     // Teacher & homeroom directory (PII protected: matching email or admin)
     match /staffDirectory/{staffId} {
-      allow get: if isVerifiedUser() && isValidId(staffId) && (isAdmin() || (('email' in existing()) && existing().email == request.auth.token.email));
-      allow list: if isVerifiedUser() && (isBootstrapAdmin() || (('email' in existing()) && existing().email == request.auth.token.email));
+      allow get: if isVerifiedUser() && isValidId(staffId) && (isAdmin() || (('email' in existing()) && existing().email == request.auth.token.email.lower()));
+      allow list: if isVerifiedUser() && (isBootstrapAdmin() || (('email' in existing()) && existing().email == request.auth.token.email.lower()));
       allow create: if isAdmin() && isValidId(staffId) && isValidStaffDirectoryItem(incoming()) && incoming().id == staffId && incoming().createdAt == request.time && incoming().updatedAt == request.time;
       allow update: if isAdmin() && isValidId(staffId) && isValidStaffDirectoryItem(incoming()) && incoming().id == existing().id && incoming().createdAt == existing().createdAt && incoming().updatedAt == request.time;
       allow delete: if isAdmin() && isValidId(staffId);
@@ -346,7 +346,7 @@ service cloud.firestore {
         request.auth.uid == uid &&
         isValidAccessRequest(incoming()) &&
         incoming().uid == uid &&
-        incoming().email == request.auth.token.email &&
+        incoming().email == request.auth.token.email.lower() &&
         incoming().status == 'pending' &&
         incoming().createdAt == request.time &&
         incoming().updatedAt == request.time;
@@ -370,8 +370,8 @@ service cloud.firestore {
 
     // Students collection (Tier 1 Admin full control, Tier 2 Teacher progress-only update, Wali Kelas read-only)
     match /students/{studentId} {
-      allow get: if isVerifiedUser() && isValidId(studentId) && (isAdmin() || request.auth.token.email in existing().authorizedEmails);
-      allow list: if isVerifiedUser() && (isBootstrapAdmin() || request.auth.token.email in existing().authorizedEmails);
+      allow get: if isVerifiedUser() && isValidId(studentId) && (isAdmin() || request.auth.token.email.lower() in existing().authorizedEmails);
+      allow list: if isVerifiedUser() && (isBootstrapAdmin() || request.auth.token.email.lower() in existing().authorizedEmails);
       allow create: if isAdmin() &&
         isValidId(studentId) &&
         isValidStudent(incoming()) &&
@@ -387,7 +387,7 @@ service cloud.firestore {
         incoming().updatedAt == request.time && (
           isAdmin() ||
           (
-            request.auth.token.email in existing().editorEmails &&
+            request.auth.token.email.lower() in existing().editorEmails &&
             incoming().authorizedEmails == existing().authorizedEmails &&
             incoming().editorEmails == existing().editorEmails &&
             incoming().diff(existing()).affectedKeys().hasOnly([
@@ -400,8 +400,8 @@ service cloud.firestore {
 
     // Bacaan records (linked to students/{nisn}, teacher editors can create/update, wali kelas read-only)
     match /bacaan/{recordId} {
-      allow get: if isVerifiedUser() && isValidId(recordId) && (isAdmin() || request.auth.token.email in existing().authorizedEmails);
-      allow list: if isVerifiedUser() && (isBootstrapAdmin() || request.auth.token.email in existing().authorizedEmails);
+      allow get: if isVerifiedUser() && isValidId(recordId) && (isAdmin() || request.auth.token.email.lower() in existing().authorizedEmails);
+      allow list: if isVerifiedUser() && (isBootstrapAdmin() || request.auth.token.email.lower() in existing().authorizedEmails);
       allow create: if isVerifiedUser() &&
         isValidId(recordId) &&
         isValidBacaan(incoming()) &&
@@ -412,7 +412,7 @@ service cloud.firestore {
         exists(/databases/$(database)/documents/students/$(incoming().nisn)) && (
           isAdmin() ||
           (
-            request.auth.token.email in get(/databases/$(database)/documents/students/$(incoming().nisn)).data.editorEmails &&
+            request.auth.token.email.lower() in get(/databases/$(database)/documents/students/$(incoming().nisn)).data.editorEmails &&
             incoming().authorizedEmails == get(/databases/$(database)/documents/students/$(incoming().nisn)).data.authorizedEmails &&
             incoming().editorEmails == get(/databases/$(database)/documents/students/$(incoming().nisn)).data.editorEmails
           )
@@ -426,20 +426,20 @@ service cloud.firestore {
         incoming().updatedAt == request.time && (
           isAdmin() ||
           (
-            request.auth.token.email in existing().editorEmails &&
+            request.auth.token.email.lower() in existing().editorEmails &&
             incoming().authorUid == request.auth.uid &&
             incoming().authorizedEmails == existing().authorizedEmails &&
             incoming().editorEmails == existing().editorEmails &&
             incoming().diff(existing()).affectedKeys().hasOnly(['tanggal', 'tipe', 'jilid', 'halaman', 'nilai', 'catatan', 'pengajar', 'authorUid', 'updatedAt'])
           )
         );
-      allow delete: if isVerifiedUser() && isValidId(recordId) && (isAdmin() || request.auth.token.email in existing().editorEmails);
+      allow delete: if isVerifiedUser() && isValidId(recordId) && (isAdmin() || request.auth.token.email.lower() in existing().editorEmails);
     }
 
     // Tahfidz records
     match /tahfidz/{recordId} {
-      allow get: if isVerifiedUser() && isValidId(recordId) && (isAdmin() || request.auth.token.email in existing().authorizedEmails);
-      allow list: if isVerifiedUser() && (isBootstrapAdmin() || request.auth.token.email in existing().authorizedEmails);
+      allow get: if isVerifiedUser() && isValidId(recordId) && (isAdmin() || request.auth.token.email.lower() in existing().authorizedEmails);
+      allow list: if isVerifiedUser() && (isBootstrapAdmin() || request.auth.token.email.lower() in existing().authorizedEmails);
       allow create: if isVerifiedUser() &&
         isValidId(recordId) &&
         isValidTahfidz(incoming()) &&
@@ -450,7 +450,7 @@ service cloud.firestore {
         exists(/databases/$(database)/documents/students/$(incoming().nisn)) && (
           isAdmin() ||
           (
-            request.auth.token.email in get(/databases/$(database)/documents/students/$(incoming().nisn)).data.editorEmails &&
+            request.auth.token.email.lower() in get(/databases/$(database)/documents/students/$(incoming().nisn)).data.editorEmails &&
             incoming().authorizedEmails == get(/databases/$(database)/documents/students/$(incoming().nisn)).data.authorizedEmails &&
             incoming().editorEmails == get(/databases/$(database)/documents/students/$(incoming().nisn)).data.editorEmails
           )
@@ -464,20 +464,20 @@ service cloud.firestore {
         incoming().updatedAt == request.time && (
           isAdmin() ||
           (
-            request.auth.token.email in existing().editorEmails &&
+            request.auth.token.email.lower() in existing().editorEmails &&
             incoming().authorUid == request.auth.uid &&
             incoming().authorizedEmails == existing().authorizedEmails &&
             incoming().editorEmails == existing().editorEmails &&
             incoming().diff(existing()).affectedKeys().hasOnly(['tanggal', 'surat', 'ayat', 'status', 'kelancaran', 'guru', 'catatan', 'authorUid', 'updatedAt'])
           )
         );
-      allow delete: if isVerifiedUser() && isValidId(recordId) && (isAdmin() || request.auth.token.email in existing().editorEmails);
+      allow delete: if isVerifiedUser() && isValidId(recordId) && (isAdmin() || request.auth.token.email.lower() in existing().editorEmails);
     }
 
     // Absensi records
     match /absensi/{recordId} {
-      allow get: if isVerifiedUser() && isValidId(recordId) && (isAdmin() || request.auth.token.email in existing().authorizedEmails);
-      allow list: if isVerifiedUser() && (isBootstrapAdmin() || request.auth.token.email in existing().authorizedEmails);
+      allow get: if isVerifiedUser() && isValidId(recordId) && (isAdmin() || request.auth.token.email.lower() in existing().authorizedEmails);
+      allow list: if isVerifiedUser() && (isBootstrapAdmin() || request.auth.token.email.lower() in existing().authorizedEmails);
       allow create: if isVerifiedUser() &&
         isValidId(recordId) &&
         isValidAbsensi(incoming()) &&
@@ -488,7 +488,7 @@ service cloud.firestore {
         exists(/databases/$(database)/documents/students/$(incoming().nisn)) && (
           isAdmin() ||
           (
-            request.auth.token.email in get(/databases/$(database)/documents/students/$(incoming().nisn)).data.editorEmails &&
+            request.auth.token.email.lower() in get(/databases/$(database)/documents/students/$(incoming().nisn)).data.editorEmails &&
             incoming().authorizedEmails == get(/databases/$(database)/documents/students/$(incoming().nisn)).data.authorizedEmails &&
             incoming().editorEmails == get(/databases/$(database)/documents/students/$(incoming().nisn)).data.editorEmails
           )
@@ -502,14 +502,14 @@ service cloud.firestore {
         incoming().updatedAt == request.time && (
           isAdmin() ||
           (
-            request.auth.token.email in existing().editorEmails &&
+            request.auth.token.email.lower() in existing().editorEmails &&
             incoming().authorUid == request.auth.uid &&
             incoming().authorizedEmails == existing().authorizedEmails &&
             incoming().editorEmails == existing().editorEmails &&
             incoming().diff(existing()).affectedKeys().hasOnly(['tanggal', 'sesi', 'status', 'keterangan', 'authorUid', 'updatedAt'])
           )
         );
-      allow delete: if isVerifiedUser() && isValidId(recordId) && (isAdmin() || request.auth.token.email in existing().editorEmails);
+      allow delete: if isVerifiedUser() && isValidId(recordId) && (isAdmin() || request.auth.token.email.lower() in existing().editorEmails);
     }
 
     // Global rapor header & signatory settings (Admin-only)
@@ -549,7 +549,7 @@ service cloud.firestore {
           isAdmin() ||
           (
             exists(/databases/$(database)/documents/students/$(nisn)) &&
-            request.auth.token.email in get(/databases/$(database)/documents/students/$(nisn)).data.editorEmails
+            request.auth.token.email.lower() in get(/databases/$(database)/documents/students/$(nisn)).data.editorEmails
           )
         );
       allow delete: if isAdmin() && isValidId(nisn);

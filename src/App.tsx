@@ -110,6 +110,10 @@ export default function App() {
 
   // Modals state
   const [showLoginModal, setShowLoginModal] = useState(false);
+  const showLoginModalRef = useRef(false);
+  useEffect(() => {
+    showLoginModalRef.current = showLoginModal;
+  }, [showLoginModal]);
   const [showChangePasswordModal, setShowChangePasswordModal] = useState(false);
   const [showBacaanModal, setShowBacaanModal] = useState(false);
   const [showTahfidzModal, setShowTahfidzModal] = useState(false);
@@ -321,7 +325,10 @@ export default function App() {
       storage.syncTeachersFromStudents(false);
       await reloadData();
 
-      // 4. Restore active local session if available (Google Auth state listener below takes precedence if signed in via Google)
+      // 4. Wait for Firebase Auth persistence before deciding whether to restore a local session
+      await auth.authStateReady();
+      if (!isMounted) return;
+
       const savedSession = authService.getSavedSession();
       if (savedSession && !auth.currentUser) {
         setUser(savedSession);
@@ -345,9 +352,14 @@ export default function App() {
           const resolved = await cloudDb.resolveGoogleUserSession(fbUser);
           if (!isMounted) return;
           if (resolved.status === 'authorized' && resolved.session) {
+            authService.logout();
             setUser(resolved.session);
             setCloudConnected(true);
             startCloudSubscription(resolved.session);
+            if (showLoginModalRef.current) {
+              setShowLoginModal(false);
+              setCurrentView('dashboard');
+            }
           }
         } catch (err) {
           console.error('Auth resolution error:', err);
@@ -447,13 +459,14 @@ export default function App() {
   };
 
   const handleLogin = (session: UserSession) => {
-    setUser(session);
-    setCurrentView('dashboard');
-    refreshAccounts();
     if (session.authProvider === 'google') {
+      authService.logout();
       setCloudConnected(true);
       startCloudSubscription(session);
     }
+    setUser(session);
+    setCurrentView('dashboard');
+    refreshAccounts();
     addToast(
       'success',
       'Login Berhasil',

@@ -39,6 +39,8 @@ export const LoginModal: React.FC<LoginModalProps> = ({
 
   // Google Sign-In & Access Request states
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
+  const [googleError, setGoogleError] = useState<string | null>(null);
+  const [showNewTabHint, setShowNewTabHint] = useState(false);
   const [unlinkedUser, setUnlinkedUser] = useState<FirebaseUser | null>(null);
   const [pendingRequest, setPendingRequest] = useState<AccessRequest | null>(null);
   const [reqNama, setReqNama] = useState('');
@@ -46,10 +48,14 @@ export const LoginModal: React.FC<LoginModalProps> = ({
   const [reqNote, setReqNote] = useState('');
   const [reqSuccessMsg, setReqSuccessMsg] = useState<string | null>(null);
 
+  const isInIframe = typeof window !== 'undefined' && window.self !== window.top;
+
   // Reset form when modal opens/closes
   useEffect(() => {
     if (isOpen) {
       setError(null);
+      setGoogleError(null);
+      setShowNewTabHint(false);
       setPassword('');
       setShowPassword(false);
       setReqSuccessMsg(null);
@@ -76,9 +82,68 @@ export const LoginModal: React.FC<LoginModalProps> = ({
 
   if (!isOpen) return null;
 
+  const formatGoogleAuthError = (err: any): { msg: string; suggestNewTab: boolean } => {
+    const code = String(err?.code || '');
+    const rawMsg = String(err?.message || '');
+
+    if (code === 'auth/popup-blocked') {
+      return {
+        msg: 'Pop-up login Google diblokir oleh browser Anda. Izinkan pop-up untuk situs ini atau buka portal di tab browser penuh di bawah.',
+        suggestNewTab: true
+      };
+    }
+    if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
+      return {
+        msg: isInIframe
+          ? 'Pop-up login Google tertutup atau dibatasi di dalam frame preview. Klik "Buka Portal di Tab Baru" di bawah lalu login dengan akun Google Anda.'
+          : 'Jendela pilih akun Google ditutup sebelum login selesai. Jika browser menutupnya otomatis, coba buka di tab Chrome/Safari penuh.',
+        suggestNewTab: true
+      };
+    }
+    if (code === 'auth/operation-not-supported-in-this-environment' || code === 'auth/web-storage-unsupported') {
+      return {
+        msg: 'Browser atau aplikasi pembuka tautan ini (seperti browser bawaan WhatsApp/frame) tidak mendukung pop-up Google. Buka portal langsung di Chrome/Safari pada tab baru.',
+        suggestNewTab: true
+      };
+    }
+    if (code === 'auth/unauthorized-domain') {
+      const host = typeof window !== 'undefined' ? window.location.hostname : 'domain ini';
+      return {
+        msg: `Domain (${host}) belum diizinkan pada Firebase Auth. Pastikan Anda membuka tautan resmi aplikasi atau hubungi Admin.`,
+        suggestNewTab: false
+      };
+    }
+    if (code === 'auth/network-request-failed') {
+      return {
+        msg: 'Gagal terhubung ke server Google/Firebase. Periksa koneksi internet Anda lalu coba lagi.',
+        suggestNewTab: false
+      };
+    }
+
+    // Parse JSON wrapped Firestore errors if any
+    try {
+      const parsed = JSON.parse(rawMsg);
+      if (parsed?.error) {
+        return {
+          msg: `Gagal verifikasi akses Cloud: ${parsed.error}`,
+          suggestNewTab: false
+        };
+      }
+    } catch {
+      // non-JSON
+    }
+
+    return {
+      msg: rawMsg || 'Gagal masuk dengan Google. Pastikan koneksi internet aktif dan pop-up diizinkan.',
+      suggestNewTab: isInIframe
+    };
+  };
+
   const handleGoogleSignIn = async () => {
     if (isGoogleLoading || isSubmitting) return;
     setError(null);
+    setGoogleError(null);
+    setShowNewTabHint(false);
     setReqSuccessMsg(null);
     setIsGoogleLoading(true);
 
@@ -94,13 +159,13 @@ export const LoginModal: React.FC<LoginModalProps> = ({
 
       if (result.status === 'unverified') {
         await cloudDb.signOutGoogle();
-        setError('Email Google Anda belum terverifikasi. Gunakan akun Gmail yang terverifikasi.');
+        setGoogleError('Email Google Anda belum terverifikasi. Gunakan akun Gmail yang terverifikasi.');
         return;
       }
 
       if (result.status === 'disabled') {
         await cloudDb.signOutGoogle();
-        setError('Akun Google Anda sedang dinonaktifkan oleh Administrator. Hubungi Admin SIM-Qur\'an.');
+        setGoogleError('Akun Google Anda sedang dinonaktifkan oleh Administrator. Hubungi Admin SIM-Qur\'an.');
         return;
       }
 
@@ -111,12 +176,9 @@ export const LoginModal: React.FC<LoginModalProps> = ({
       setReqRole(result.pendingRequest?.requestedRole || 'guru_ngaji');
       setReqNote(result.pendingRequest?.requestedNote || '');
     } catch (err: any) {
-      const code = err?.code || '';
-      if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
-        setError(null);
-      } else {
-        setError(err?.message || 'Gagal masuk dengan Google. Pastikan koneksi internet aktif dan pop-up diizinkan.');
-      }
+      const { msg, suggestNewTab } = formatGoogleAuthError(err);
+      setGoogleError(msg);
+      setShowNewTabHint(suggestNewTab);
     } finally {
       setIsGoogleLoading(false);
     }
@@ -156,6 +218,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
     setPendingRequest(null);
     setReqSuccessMsg(null);
     setError(null);
+    setGoogleError(null);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -222,7 +285,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
               <div className="text-xs text-sky-950 leading-relaxed">
                 <p className="font-bold">Akun Google Terdeteksi: {unlinkedUser.email}</p>
                 <p className="text-[11px] text-sky-800 mt-0.5">
-                  Email Google ini belum ditautkan oleh Administrator. Ajukan permintaan akses agar Admin menautkan akun Anda ke Guru BTQ, Guru Tahfidz, atau Wali Kelas.
+                  Email Google ini belum ditautkan ke daftar Guru/Wali Kelas. Untuk login sebagai <strong>Admin Utama Cloud</strong>, klik <strong>Ganti Akun</strong> lalu pilih <code className="font-mono font-bold">btqtahfidzsmpm2@gmail.com</code>. Jika Anda Guru/Wali Kelas, kirim permintaan akses di bawah ini.
                 </p>
               </div>
             </div>
@@ -352,7 +415,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                 </span>
               </div>
               <p className="text-[11px] text-emerald-800 leading-relaxed">
-                Masuk dengan akun Google sekolah/pribadi untuk sinkronisasi otomatis antar HP & laptop secara real-time.
+                Admin (<code className="font-mono font-bold">btqtahfidzsmpm2@gmail.com</code>) &amp; Guru masuk dengan akun Google untuk sinkronisasi real-time antar HP &amp; laptop.
               </p>
               <button
                 type="button"
@@ -382,6 +445,39 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                   {isGoogleLoading ? 'Menghubungkan ke Google...' : 'Masuk dengan Akun Google'}
                 </span>
               </button>
+
+              {googleError && (
+                <div className="p-2.5 rounded-xl bg-rose-50 border border-rose-200 space-y-2 text-rose-900">
+                  <div className="flex items-start gap-2 text-[11px] leading-relaxed">
+                    <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                    <span className="font-semibold">{googleError}</span>
+                  </div>
+                  {(showNewTabHint || isInIframe) && typeof window !== 'undefined' && (
+                    <a
+                      href={window.location.href}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="block w-full text-center py-2 px-3 bg-emerald-800 hover:bg-emerald-700 text-white rounded-lg text-[11px] font-bold transition-colors"
+                    >
+                      Buka Portal di Tab Baru (Solusi Login Google)
+                    </a>
+                  )}
+                </div>
+              )}
+
+              {!googleError && isInIframe && typeof window !== 'undefined' && (
+                <div className="flex items-center justify-between gap-2 pt-0.5 text-[10px] text-emerald-900/80">
+                  <span>Menggunakan frame preview?</span>
+                  <a
+                    href={window.location.href}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="font-bold text-emerald-800 underline hover:text-emerald-950 shrink-0"
+                  >
+                    Buka di Tab Baru &rarr;
+                  </a>
+                </div>
+              )}
             </div>
 
             {/* Divider */}

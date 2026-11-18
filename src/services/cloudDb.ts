@@ -76,6 +76,7 @@ export interface CloudSnapshotCallbacks {
 // Runtime ACL cache populated from live Firestore students & staffDirectory snapshots
 const studentAclCache = new Map<string, StudentAcl>();
 let cachedStaffDirectory: StaffDirectoryRecord[] = [];
+const inFlightResolveByUid = new Map<string, Promise<GoogleResolveResult>>();
 
 function mergeStaffDirectoryCache(items: StaffDirectoryRecord[]): void {
   const map = new Map(cachedStaffDirectory.map(item => [item.id, item]));
@@ -357,13 +358,29 @@ export const cloudDb = {
    * Resolves the authenticated Google account into an authorized SIM-Qur'an role session,
    * checking Bootstrap Admin, /admins/{uid}, /staffUsers/{uid}, and /staffDirectory email bindings.
    */
-  async resolveGoogleUserSession(fbUser: FirebaseUser): Promise<GoogleResolveResult> {
+  resolveGoogleUserSession(fbUser: FirebaseUser): Promise<GoogleResolveResult> {
     if (!fbUser.emailVerified || !fbUser.email) {
-      return { status: 'unverified', firebaseUser: fbUser };
+      return Promise.resolve({ status: 'unverified', firebaseUser: fbUser });
     }
 
-    const email = normalizeEmail(fbUser.email);
     const uid = sanitizeDocId(fbUser.uid, 128);
+    const existingPromise = inFlightResolveByUid.get(uid);
+    if (existingPromise) {
+      return existingPromise;
+    }
+
+    const resolvePromise = this._resolveGoogleUserSessionInternal(fbUser, uid).finally(() => {
+      inFlightResolveByUid.delete(uid);
+    });
+    inFlightResolveByUid.set(uid, resolvePromise);
+    return resolvePromise;
+  },
+
+  async _resolveGoogleUserSessionInternal(
+    fbUser: FirebaseUser,
+    uid: string
+  ): Promise<GoogleResolveResult> {
+    const email = normalizeEmail(fbUser.email);
     const displayName = clampStr(fbUser.displayName || email.split('@')[0], 120, 'Petugas');
 
     // 1. Bootstrap Admin email check
@@ -372,15 +389,25 @@ export const cloudDb = {
         const adminRef = doc(db, 'admins', uid);
         const adminSnap = await getDoc(adminRef);
         if (!adminSnap.exists()) {
-          await setDoc(adminRef, {
-            uid,
-            email,
-            nama: displayName,
-            createdAt: serverTimestamp()
-          });
+          try {
+            await setDoc(adminRef, {
+              uid,
+              email,
+              nama: displayName,
+              createdAt: serverTimestamp()
+            });
+          } catch (writeErr) {
+            // Re-check if another concurrent tab/listener created admins/{uid}
+            const recheck = await getDoc(adminRef);
+            if (!recheck.exists()) {
+              throw writeErr;
+            }
+          }
         }
       } catch (error) {
-        handleFirestoreError(error, OperationType.WRITE, `admins/${uid}`);
+        // Bootstrap Admin is also authorized directly by email in firestore.rules (isBootstrapAdmin()),
+        // so log cleanly without blocking admin login on transient network/registry hiccups.
+        console.warn('Bootstrap admins/{uid} registry sync note:', error);
       }
 
       return {
