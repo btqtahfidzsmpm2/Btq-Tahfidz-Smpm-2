@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Student, UserSession } from '../../types';
 import { storage } from '../../services/storage';
-import { cloudDb } from '../../services/cloudDb';
 import { X, Award } from 'lucide-react';
 
 interface InputTahfidzModalProps {
@@ -42,7 +41,7 @@ export const InputTahfidzModal: React.FC<InputTahfidzModalProps> = ({
 
   if (!isOpen) return null;
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!nisn) {
       onNotify('error', 'Pilih Siswa', 'Silakan pilih santri tahfidz.');
@@ -50,7 +49,7 @@ export const InputTahfidzModal: React.FC<InputTahfidzModalProps> = ({
     }
 
     const currentStudent = students.find(s => s.nisn === nisn);
-    const newRecord = storage.addTahfidz({
+    storage.addTahfidz({
       nisn,
       tanggal,
       surat,
@@ -60,15 +59,6 @@ export const InputTahfidzModal: React.FC<InputTahfidzModalProps> = ({
       guru: user.nama,
       catatan
     });
-
-    if (cloudDb.isCloudAuthenticated()) {
-      const updatedStudent = storage.getStudents().find(s => s.nisn === nisn) || currentStudent;
-      try {
-        await cloudDb.addTahfidzCloud(newRecord, updatedStudent, cloudDb.getCachedStaffDirectory());
-      } catch (err: any) {
-        onNotify('error', 'Gagal Sinkron Cloud', err?.message || 'Periksa izin Firestore.');
-      }
-    }
 
     onNotify(
       'success',

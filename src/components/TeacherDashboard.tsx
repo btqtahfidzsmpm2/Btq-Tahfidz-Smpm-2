@@ -8,7 +8,6 @@ import {
   BacaanRecord,
   TahfidzRecord,
   AbsensiRecord,
-  AccessRequest,
   RaporSettings,
   RaporPrintStatus,
   RaporPrintBatchLog
@@ -18,7 +17,6 @@ import { AccountSecurityPanel } from './AccountSecurityPanel';
 import { ReportCenterPanel } from './ReportCenterPanel';
 import { MonthlyAttendancePanel } from './MonthlyAttendancePanel';
 import { storage } from '../services/storage';
-import { cloudDb, StaffDirectoryRecord } from '../services/cloudDb';
 import { downloadRaporPdf } from '../services/raporPdf';
 import {
   getAuthorizedStudents,
@@ -60,9 +58,7 @@ import {
   AlertTriangle,
   Printer,
   FileDown,
-  CalendarDays,
-  Cloud,
-  UploadCloud
+  CalendarDays
 } from 'lucide-react';
 
 interface TeacherDashboardProps {
@@ -74,16 +70,9 @@ interface TeacherDashboardProps {
   absensiList: AbsensiRecord[];
   accounts: UserAccount[];
   authLogs: AuthLogEntry[];
-  staffDirectory?: StaffDirectoryRecord[];
-  accessRequests?: AccessRequest[];
-  cloudConnected?: boolean;
   raporSettings?: RaporSettings;
   raporPrintStatuses?: Record<string, RaporPrintStatus>;
   raporPrintLogs?: RaporPrintBatchLog[];
-  hasLocalDataToPush?: boolean;
-  isPushingToCloud?: boolean;
-  onPushLocalToCloud?: () => Promise<void>;
-  onOpenLoginModal?: () => void;
   onRefreshAccounts: () => void;
   onOpenChangePasswordModal: () => void;
   onOpenBacaanModal: (student?: Student) => void;
@@ -114,16 +103,9 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   absensiList,
   accounts,
   authLogs,
-  staffDirectory = [],
-  accessRequests = [],
-  cloudConnected = false,
   raporSettings,
   raporPrintStatuses,
   raporPrintLogs,
-  hasLocalDataToPush = false,
-  isPushingToCloud = false,
-  onPushLocalToCloud,
-  onOpenLoginModal,
   onRefreshAccounts,
   onOpenChangePasswordModal,
   onOpenBacaanModal,
@@ -147,11 +129,6 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   // Admin sub-menu tab: 'siswa' | 'penilaian' | 'absensi' | 'rapor' | 'guru' | 'keamanan'
   const [adminTab, setAdminTab] = useState<'siswa' | 'penilaian' | 'absensi' | 'rapor' | 'guru' | 'keamanan'>('siswa');
   const [preselectedPrintNisn, setPreselectedPrintNisn] = useState<string | null>(null);
-
-  const pendingRequestsCount = useMemo(
-    () => accessRequests.filter(r => r.status === 'pending').length,
-    [accessRequests]
-  );
 
   // Guru Ngaji tab: 'tabel' | 'absensi' | 'list'
   const [guruNgajiTab, setGuruNgajiTab] = useState<'tabel' | 'absensi' | 'list'>('tabel');
@@ -382,7 +359,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
         settings,
         fileLabel: `Kelas_${student.kelas}_${student.nama}`
       });
-      const res = storage.recordRaporPrintBatch({
+      storage.recordRaporPrintBatch({
         students: [student],
         printedBy: user.nama,
         kelasLabel: `Kelas ${student.kelas}`,
@@ -390,9 +367,6 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
         semester: settings.semester,
         tahunAjaran: settings.tahunAjaran
       });
-      if (cloudDb.isCloudAuthenticated()) {
-        await cloudDb.recordRaporPrintBatchCloud(res.updatedStatuses, res.newLog);
-      }
       onNotify(
         'success',
         'Download Rapor PDF Berhasil',
@@ -422,37 +396,8 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
     <div className="space-y-6">
       <div className="no-print space-y-6">
 
-      {/* Offline Local Auth Notice Banner (reminds user to connect Google for cross-account Cloud sync) */}
-      {user.authProvider !== 'google' && (
-        <section className="bg-sky-50 border border-sky-200 rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-2xs">
-          <div className="flex items-start gap-3">
-            <div className="w-8 h-8 rounded-xl bg-sky-700 text-white flex items-center justify-center shrink-0">
-              <Cloud className="w-4 h-4" />
-            </div>
-            <div>
-              <h3 className="text-xs font-extrabold text-sky-950">
-                Mode Lokal Perangkat (Belum Tersinkron ke Akun / HP Lain)
-              </h3>
-              <p className="text-[11px] text-sky-900 mt-0.5 leading-relaxed">
-                Anda masuk dengan akun lokal perangkat. Agar perubahan data tersimpan ke Cloud dan sinkron saat dibuka di akun/perangkat lain, hubungkan akun Google Anda.
-              </p>
-            </div>
-          </div>
-          {onOpenLoginModal && (
-            <button
-              type="button"
-              onClick={onOpenLoginModal}
-              className="px-3.5 py-2 bg-sky-700 hover:bg-sky-800 text-white font-bold rounded-xl text-xs transition-colors flex items-center gap-1.5 shrink-0 shadow-2xs"
-            >
-              <Cloud className="w-3.5 h-3.5" />
-              <span>Hubungkan Akun Google</span>
-            </button>
-          )}
-        </section>
-      )}
-
-      {/* Default Password Security Alert Banner (Local Auth only) */}
-      {user.isDefaultPassword && user.authProvider !== 'google' && (
+      {/* Default Password Security Alert Banner */}
+      {user.isDefaultPassword && (
         <section className="bg-amber-50 border border-amber-300 rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-2xs">
           <div className="flex items-start gap-3">
             <div className="w-8 h-8 rounded-xl bg-amber-400 text-slate-900 flex items-center justify-center shrink-0">
@@ -473,52 +418,6 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
           >
             <KeyRound className="w-3.5 h-3.5" />
             <span>Ubah Password Sekarang</span>
-          </button>
-        </section>
-      )}
-
-      {/* Admin Cloud Migration / Pending Google Requests Banner */}
-      {user.role === 'admin' && user.authProvider === 'google' && hasLocalDataToPush && onPushLocalToCloud && (
-        <section className="bg-indigo-50 border border-indigo-200 rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-2xs">
-          <div className="flex items-start gap-3">
-            <div className="w-8 h-8 rounded-xl bg-indigo-600 text-white flex items-center justify-center shrink-0">
-              <UploadCloud className="w-4 h-4" />
-            </div>
-            <div>
-              <h3 className="text-xs font-extrabold text-indigo-950">
-                Database Cloud Masih Kosong — Data Lokal Terdeteksi
-              </h3>
-              <p className="text-[11px] text-indigo-800 mt-0.5 leading-relaxed">
-                Anda memiliki data siswa/guru tersimpan di browser ini. Klik tombol di kanan untuk mengunggahnya ke Cloud Firestore agar bisa diakses semua guru secara real-time.
-              </p>
-            </div>
-          </div>
-          <button
-            type="button"
-            disabled={isPushingToCloud}
-            onClick={onPushLocalToCloud}
-            className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white font-bold rounded-xl text-xs transition-colors flex items-center gap-1.5 shrink-0 shadow-2xs"
-          >
-            <Cloud className="w-3.5 h-3.5" />
-            <span>{isPushingToCloud ? 'Mengunggah ke Cloud...' : 'Upload Data Lokal ke Cloud'}</span>
-          </button>
-        </section>
-      )}
-
-      {user.role === 'admin' && pendingRequestsCount > 0 && adminTab !== 'keamanan' && (
-        <section className="bg-sky-50 border border-sky-200 rounded-2xl p-3.5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-2xs">
-          <div className="flex items-center gap-2.5 text-xs text-sky-950">
-            <Cloud className="w-4 h-4 text-sky-700 shrink-0" />
-            <span>
-              Terdapat <strong>{pendingRequestsCount} permintaan akses login Google</strong> dari guru/wali kelas yang menunggu persetujuan Anda.
-            </span>
-          </div>
-          <button
-            type="button"
-            onClick={() => setAdminTab('keamanan')}
-            className="px-3 py-1.5 bg-sky-700 hover:bg-sky-800 text-white font-bold rounded-xl text-xs shrink-0"
-          >
-            Tinjau Permintaan Akses
           </button>
         </section>
       )}
@@ -546,12 +445,6 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
               <span className="text-xs text-emerald-800 font-semibold bg-emerald-50 px-2.5 py-0.5 rounded-md border border-emerald-200 uppercase font-mono">
                 {user.nama}
               </span>
-              {cloudConnected && (
-                <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
-                  <Cloud className="w-3 h-3" />
-                  <span>Cloud Online</span>
-                </span>
-              )}
             </div>
             <p className="text-xs text-slate-500 mt-1 max-w-2xl leading-relaxed">
               {getRoleDescription()}
@@ -850,11 +743,6 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
             >
               <Shield className="w-4 h-4" />
               <span>Akun & Keamanan Login ({accounts.length})</span>
-              {pendingRequestsCount > 0 && (
-                <span className="px-1.5 py-0.5 rounded bg-sky-500 text-white text-[10px] font-mono font-bold">
-                  {pendingRequestsCount} Baru
-                </span>
-              )}
             </button>
           </div>
 
@@ -911,10 +799,6 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
           currentUser={user}
           accounts={accounts}
           logs={authLogs}
-          teachers={teachers}
-          staffDirectory={staffDirectory}
-          accessRequests={accessRequests}
-          students={students}
           onRefreshAccounts={onRefreshAccounts}
           onNotify={onNotify}
         />
@@ -1797,11 +1681,6 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                         <tr key={teacher.id} className="hover:bg-slate-50/70 transition-colors">
                           <td className="p-3 font-bold text-slate-900">
                             <div>{teacher.nama}</div>
-                            {teacher.email && (
-                              <div className="text-[11px] font-mono font-normal text-sky-700 mt-0.5">
-                                Google: {teacher.email}
-                              </div>
-                            )}
                             {linkedAcc && (
                               <div className="text-[11px] font-mono font-normal text-slate-500 mt-0.5">
                                 Login: <span className="text-emerald-800 font-semibold">{linkedAcc.username}</span>

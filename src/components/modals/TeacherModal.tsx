@@ -2,9 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { Teacher } from '../../types';
 import { storage } from '../../services/storage';
 import { authService, slugifyUsername, DEFAULT_PASSWORDS } from '../../services/auth';
-import { cloudDb, StaffDirectoryRecord } from '../../services/cloudDb';
 import { splitGroupTokens } from '../../utils/access';
-import { X, UserCheck, BookOpen, Award, KeyRound, Eye, EyeOff, User, Mail } from 'lucide-react';
+import { X, UserCheck, BookOpen, Award, KeyRound, Eye, EyeOff, User } from 'lucide-react';
 
 interface TeacherModalProps {
   isOpen: boolean;
@@ -28,7 +27,6 @@ export const TeacherModal: React.FC<TeacherModalProps> = ({
   const [kelompokTahfidz, setKelompokTahfidz] = useState('HALAQAH TAHFIDZ');
   const [ruangan, setRuangan] = useState('RUANGAN 7A');
   const [kontak, setKontak] = useState('');
-  const [email, setEmail] = useState('');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -58,7 +56,6 @@ export const TeacherModal: React.FC<TeacherModalProps> = ({
 
       setRuangan(teacherToEdit.ruangan);
       setKontak(teacherToEdit.kontak || '');
-      setEmail(teacherToEdit.email || '');
       const existingAcc = authService
         .getAccounts()
         .find(
@@ -76,7 +73,6 @@ export const TeacherModal: React.FC<TeacherModalProps> = ({
       setKelompokTahfidz('HALAQAH TAHFIDZ');
       setRuangan('RUANGAN 7A');
       setKontak('');
-      setEmail('');
       setUsername('');
       setUsernameEditedManually(false);
     }
@@ -121,7 +117,6 @@ export const TeacherModal: React.FC<TeacherModalProps> = ({
       ? kelompokTahfidz.trim().toUpperCase() || 'HALAQAH TAHFIDZ'
       : undefined;
 
-    const cleanEmail = email.trim().toLowerCase() || undefined;
     let savedTeacher: Teacher;
     if (teacherToEdit) {
       storage.updateTeacher(teacherToEdit.id, {
@@ -130,8 +125,7 @@ export const TeacherModal: React.FC<TeacherModalProps> = ({
         kelompokBTQ: combinedBTQ,
         kelompokTahfidz: tahfidzGroupValue,
         ruangan: ruangan.trim(),
-        kontak: kontak.trim(),
-        email: cleanEmail
+        kontak: kontak.trim()
       });
       savedTeacher = {
         ...teacherToEdit,
@@ -140,8 +134,7 @@ export const TeacherModal: React.FC<TeacherModalProps> = ({
         kelompokBTQ: combinedBTQ,
         kelompokTahfidz: tahfidzGroupValue,
         ruangan: ruangan.trim(),
-        kontak: kontak.trim(),
-        email: cleanEmail
+        kontak: kontak.trim()
       };
     } else {
       savedTeacher = storage.addTeacher({
@@ -150,8 +143,7 @@ export const TeacherModal: React.FC<TeacherModalProps> = ({
         kelompokBTQ: combinedBTQ,
         kelompokTahfidz: tahfidzGroupValue,
         ruangan: ruangan.trim(),
-        kontak: kontak.trim(),
-        email: cleanEmail
+        kontak: kontak.trim()
       });
     }
 
@@ -164,26 +156,6 @@ export const TeacherModal: React.FC<TeacherModalProps> = ({
     if (!credRes.ok) {
       onNotify('error', 'Gagal Mengatur Akun Login', credRes.error);
       return;
-    }
-
-    if (cloudDb.isCloudAuthenticated()) {
-      try {
-        const dirRecord: StaffDirectoryRecord = {
-          id: savedTeacher.id,
-          nama: savedTeacher.nama,
-          role: savedTeacher.role,
-          kelompokBTQ: savedTeacher.kelompokBTQ,
-          kelompokTahfidz: savedTeacher.kelompokTahfidz,
-          ruangan: savedTeacher.ruangan,
-          kontak: savedTeacher.kontak,
-          email: cleanEmail
-        };
-        await cloudDb.saveStaffDirectoryBatch([dirRecord]);
-        const nextDir = cloudDb.getCachedStaffDirectory();
-        await cloudDb.recomputeAllPermissionsCloud(storage.getStudents(), nextDir);
-      } catch (err: any) {
-        onNotify('error', 'Gagal Sinkron Cloud', err?.message || 'Periksa koneksi Firestore.');
-      }
     }
 
     if (teacherToEdit) {
@@ -350,24 +322,6 @@ export const TeacherModal: React.FC<TeacherModalProps> = ({
                 className="w-full p-2 border border-slate-300 rounded-lg text-xs font-mono bg-white focus:outline-none focus:ring-1 focus:ring-emerald-500"
               />
             </div>
-          </div>
-
-          {/* Google Cloud Email Binding */}
-          <div className="p-3 rounded-xl bg-blue-50/60 border border-blue-200 space-y-1.5">
-            <label className="text-xs font-bold text-blue-950 flex items-center gap-1.5">
-              <Mail className="w-3.5 h-3.5 text-blue-700" />
-              <span>Email Google Guru (Login Cloud Online - Opsional):</span>
-            </label>
-            <input
-              type="email"
-              value={email}
-              onChange={e => setEmail(e.target.value)}
-              placeholder="contoh: ustadzah.siti@gmail.com"
-              className="w-full p-2 border border-blue-200 rounded-lg text-xs font-mono bg-white focus:outline-none focus:ring-1 focus:ring-blue-500"
-            />
-            <p className="text-[10px] text-blue-800 leading-relaxed">
-              Isi dengan alamat Gmail guru agar bisa langsung masuk menggunakan tombol <strong>Masuk dengan Google</strong> dan otomatis melihat santri binaannya secara real-time.
-            </p>
           </div>
 
           {/* Credentials Box */}

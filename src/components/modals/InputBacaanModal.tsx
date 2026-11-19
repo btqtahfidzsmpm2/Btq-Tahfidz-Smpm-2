@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Student, UserSession } from '../../types';
 import { storage } from '../../services/storage';
-import { cloudDb } from '../../services/cloudDb';
 import { X, BookOpen } from 'lucide-react';
 
 interface InputBacaanModalProps {
@@ -50,7 +49,7 @@ export const InputBacaanModal: React.FC<InputBacaanModalProps> = ({
 
   if (!isOpen) return null;
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!nisn) {
       onNotify('error', 'Pilih Siswa', 'Silakan pilih siswa yang dinilai terlebih dahulu.');
@@ -58,7 +57,7 @@ export const InputBacaanModal: React.FC<InputBacaanModalProps> = ({
     }
 
     const currentStudent = students.find(s => s.nisn === nisn);
-    const newRecord = storage.addBacaan({
+    storage.addBacaan({
       nisn,
       tanggal,
       tipe,
@@ -68,15 +67,6 @@ export const InputBacaanModal: React.FC<InputBacaanModalProps> = ({
       catatan,
       pengajar: user.nama
     });
-
-    if (cloudDb.isCloudAuthenticated()) {
-      const updatedStudent = storage.getStudents().find(s => s.nisn === nisn) || currentStudent;
-      try {
-        await cloudDb.upsertBacaanCloud(newRecord, updatedStudent, cloudDb.getCachedStaffDirectory());
-      } catch (err: any) {
-        onNotify('error', 'Gagal Sinkron Cloud', err?.message || 'Periksa izin Firestore.');
-      }
-    }
 
     onNotify(
       'success',

@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Student, UserSession } from '../../types';
 import { storage } from '../../services/storage';
-import { cloudDb } from '../../services/cloudDb';
 import { detectBtqClassGender, isValidBtqClass } from '../../utils/access';
 import { computeStudentAttendanceSummary, getCurrentMonthStr } from '../../utils/attendance';
 import { X, ClipboardCheck, Check, AlertTriangle } from 'lucide-react';
@@ -104,7 +103,7 @@ export const PresensiModal: React.FC<PresensiModalProps> = ({
     setAttendanceMap(newMap);
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (visibleStudents.length === 0) {
       onNotify(
@@ -121,23 +120,6 @@ export const PresensiModal: React.FC<PresensiModalProps> = ({
     }));
 
     storage.saveAttendanceBatch(entries, sesi, tanggal);
-
-    if (cloudDb.isCloudAuthenticated()) {
-      const nisnSet = new Set(entries.map(en => en.nisn));
-      const savedRecords = storage
-        .getAbsensi()
-        .filter(a => a.tanggal === tanggal && a.sesi === sesi && nisnSet.has(a.nisn));
-      const affectedStudents = storage.getStudents().filter(s => nisnSet.has(s.nisn));
-      try {
-        await cloudDb.saveAbsensiBatchCloud(
-          savedRecords,
-          affectedStudents,
-          cloudDb.getCachedStaffDirectory()
-        );
-      } catch (err: any) {
-        onNotify('error', 'Gagal Sinkron Cloud', err?.message || 'Periksa izin Firestore.');
-      }
-    }
 
     onNotify(
       'success',

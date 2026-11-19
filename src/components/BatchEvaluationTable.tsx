@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Student, UserSession, BacaanRecord, AbsensiRecord } from '../types';
 import { storage } from '../services/storage';
-import { cloudDb } from '../services/cloudDb';
 import { detectBtqClassGender, isValidBtqClass } from '../utils/access';
 import {
   Save,
@@ -241,39 +240,6 @@ export const BatchEvaluationTable: React.FC<BatchEvaluationTableProps> = ({
     return (Object.values(rows) as EvaluationRow[]).filter(r => r.isDirty).length;
   }, [rows]);
 
-  // Helper to sync saved nisn evaluations for current tanggal to Cloud Firestore
-  const syncSavedRowsToCloud = async (nisns: string[]) => {
-    if (!cloudDb.isCloudAuthenticated() || nisns.length === 0) return;
-    const nisnSet = new Set(nisns);
-    const updatedStudents = storage.getStudents();
-    const updatedBacaan = storage.getBacaan();
-    const updatedAbsensi = storage.getAbsensi();
-
-    const cloudItems: Array<{ bacaan: BacaanRecord; absensi?: AbsensiRecord; student: Student }> = [];
-    nisnSet.forEach(nisn => {
-      const student = updatedStudents.find(s => s.nisn === nisn);
-      const bacaan = updatedBacaan.find(
-        b => b.id === `b-${nisn}-${tanggal}` || (b.nisn === nisn && b.tanggal === tanggal)
-      );
-      const absensi = updatedAbsensi.find(
-        a =>
-          a.id === `${nisn}_${tanggal}_btq` ||
-          (a.nisn === nisn && a.tanggal === tanggal && a.sesi === 'btq')
-      );
-      if (student && bacaan) {
-        cloudItems.push({ bacaan, absensi, student });
-      }
-    });
-
-    if (cloudItems.length > 0) {
-      try {
-        await cloudDb.saveBatchBacaanCloud(cloudItems, cloudDb.getCachedStaffDirectory());
-      } catch (err: any) {
-        onNotify('error', 'Gagal Sinkron Cloud', err?.message || 'Periksa izin Firestore.');
-      }
-    }
-  };
-
   // Save a single row immediately (manual Simpan click, Enter key, or auto-save trigger)
   const persistSingleRow = (rowToSave: EvaluationRow, showToast: boolean = false) => {
     const nowTime = new Date().toLocaleTimeString('id-ID', {
@@ -295,8 +261,6 @@ export const BatchEvaluationTable: React.FC<BatchEvaluationTableProps> = ({
       },
       user.nama
     );
-
-    void syncSavedRowsToCloud([rowToSave.nisn]);
 
     setRows(prev => {
       const current = prev[rowToSave.nisn];
@@ -414,7 +378,6 @@ export const BatchEvaluationTable: React.FC<BatchEvaluationTableProps> = ({
           statusPresensi: 'Hadir' as const
         }));
       storage.saveBatchBacaanEvaluations(payload, user.nama);
-      void syncSavedRowsToCloud(payload.map(p => p.nisn));
       onDataUpdated();
       onNotify(
         'success',
@@ -491,7 +454,6 @@ export const BatchEvaluationTable: React.FC<BatchEvaluationTableProps> = ({
     }));
 
     const res = storage.saveBatchBacaanEvaluations(payload, user.nama);
-    await syncSavedRowsToCloud(payload.map(p => p.nisn));
 
     const nowTime = new Date().toLocaleTimeString('id-ID', {
       hour: '2-digit',

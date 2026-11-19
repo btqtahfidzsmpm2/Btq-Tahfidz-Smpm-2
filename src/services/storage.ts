@@ -571,8 +571,7 @@ export const storage = {
         role: 'guru_ngaji',
         kelompokBTQ: kelompokArr.length > 0 ? kelompokArr.join(', ') : existing?.kelompokBTQ || 'BTQ REGULER',
         ruangan: ruanganArr.length > 0 ? ruanganArr.slice(0, 3).join(' / ') : existing?.ruangan || 'RUANGAN KELAS',
-        kontak: existing?.kontak || undefined,
-        email: existing?.email || undefined
+        kontak: existing?.kontak || undefined
       });
     });
 
@@ -593,8 +592,7 @@ export const storage = {
         kelompokBTQ: halaqahStr,
         kelompokTahfidz: halaqahStr,
         ruangan: ruanganArr.length > 0 ? ruanganArr.slice(0, 3).join(' / ') : existing?.ruangan || 'RUANGAN TAHFIDZ',
-        kontak: existing?.kontak || undefined,
-        email: existing?.email || undefined
+        kontak: existing?.kontak || undefined
       });
     });
 
@@ -781,7 +779,6 @@ export const storage = {
       kelompok: string;
       ruangan: string;
       kontak?: string;
-      email?: string;
     }>,
     role: 'guru_ngaji' | 'guru_tahfidz'
   ): { added: number; updated: number; total: number; teachers: Teacher[] } {
@@ -808,7 +805,6 @@ export const storage = {
         inc.kelompok.trim() || (role === 'guru_tahfidz' ? 'HALAQAH TAHFIDZ' : 'BTQ REGULER');
       const cleanRoom =
         inc.ruangan.trim() || (role === 'guru_tahfidz' ? 'RUANGAN TAHFIDZ' : 'RUANGAN KELAS');
-      const cleanEmail = inc.email?.trim().toLowerCase() || undefined;
 
       if (existingTeacher) {
         map.set(key, {
@@ -817,8 +813,7 @@ export const storage = {
           kelompokBTQ: cleanGroup,
           kelompokTahfidz: role === 'guru_tahfidz' ? cleanGroup : existingTeacher.kelompokTahfidz,
           ruangan: cleanRoom,
-          kontak: inc.kontak?.trim() || existingTeacher.kontak,
-          email: cleanEmail || existingTeacher.email
+          kontak: inc.kontak?.trim() || existingTeacher.kontak
         });
         updated++;
       } else {
@@ -829,8 +824,7 @@ export const storage = {
           kelompokBTQ: cleanGroup,
           kelompokTahfidz: role === 'guru_tahfidz' ? cleanGroup : undefined,
           ruangan: cleanRoom,
-          kontak: inc.kontak?.trim() || undefined,
-          email: cleanEmail
+          kontak: inc.kontak?.trim() || undefined
         });
         added++;
       }

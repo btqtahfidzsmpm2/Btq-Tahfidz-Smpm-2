@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { Student, BacaanRecord, TahfidzRecord, AbsensiRecord } from '../types';
-import { cloudDb } from '../services/cloudDb';
-import { Search, BookOpen, Award, CheckCircle2, User, Loader2 } from 'lucide-react';
+import { Search, BookOpen, Award, CheckCircle2, User } from 'lucide-react';
 
 interface PublicPortalProps {
   students: Student[];
@@ -24,9 +23,8 @@ export const PublicPortal: React.FC<PublicPortalProps> = ({
 }) => {
   const [query, setQuery] = useState('');
   const [activeTab, setActiveTab] = useState<'bacaan' | 'tahfidz' | 'absensi'>('bacaan');
-  const [isSearching, setIsSearching] = useState(false);
 
-  const handleSearch = async (customQuery?: string) => {
+  const handleSearch = (customQuery?: string) => {
     const raw = (customQuery ?? query).trim();
     const q = raw.toLowerCase();
     if (!q) {
@@ -44,34 +42,12 @@ export const PublicPortal: React.FC<PublicPortalProps> = ({
       return;
     }
 
-    // Online lookup by exact NISN via /publicReports/{nisn}
-    const cleanNisnCandidate = raw.replace(/\s+/g, '');
-    if (/^[a-zA-Z0-9_-]{4,40}$/.test(cleanNisnCandidate)) {
-      setIsSearching(true);
-      try {
-        const cloudStudent = await cloudDb.fetchPublicStudentByNisn(cleanNisnCandidate);
-        if (cloudStudent) {
-          onSelectStudent(cloudStudent);
-          onNotify(
-            'success',
-            'Data Cloud Ditemukan',
-            `Menampilkan laporan terbaru untuk ${cloudStudent.nama}.`
-          );
-          return;
-        }
-      } catch {
-        // Fallback to not found message below
-      } finally {
-        setIsSearching(false);
-      }
-    }
-
     onNotify(
       'error',
       'Data Tidak Ditemukan',
       students.length === 0
-        ? `Nomor NISN "${raw}" tidak ditemukan di Cloud. Pastikan Anda memasukkan 10 digit NISN siswa secara tepat.`
-        : `Siswa dengan kata kunci "${raw}" tidak ditemukan di database SMP Muhammadiyah 2 Surabaya.`
+        ? 'Belum ada data siswa tersimpan di browser ini. Silakan Login Petugas untuk menambahkan atau mengimpor data siswa.'
+        : `Siswa dengan kata kunci "${raw}" tidak ditemukan di database browser ini.`
     );
   };
 
@@ -138,15 +114,10 @@ export const PublicPortal: React.FC<PublicPortalProps> = ({
             </div>
             <button
               onClick={() => handleSearch()}
-              disabled={isSearching}
-              className="bg-amber-400 hover:bg-amber-500 disabled:bg-amber-300 text-slate-900 font-bold px-6 rounded-r-2xl text-xs sm:text-sm transition-colors flex items-center gap-1.5 shadow-sm"
+              className="bg-amber-400 hover:bg-amber-500 text-slate-900 font-bold px-6 rounded-r-2xl text-xs sm:text-sm transition-colors flex items-center gap-1.5 shadow-sm"
             >
-              {isSearching ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : (
-                <Search className="w-4 h-4" />
-              )}
-              <span>{isSearching ? 'Mencari...' : 'Cari'}</span>
+              <Search className="w-4 h-4" />
+              <span>Cari</span>
             </button>
           </div>
 
@@ -158,7 +129,7 @@ export const PublicPortal: React.FC<PublicPortalProps> = ({
               </span>
             ) : (
               <span className="text-emerald-100/90">
-                Portal Cloud Online Aktif — Wali murid dapat langsung memasukkan <strong>10 digit NISN</strong> anak untuk melihat capaian terbaru, atau <strong>Login Petugas</strong> untuk mengelola data.
+                Data siswa belum diisi pada browser ini — silakan klik <strong>Login Petugas</strong> untuk mengimpor atau menambahkan data siswa.
               </span>
             )}
           </div>

@@ -19,28 +19,10 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
   };
 
   public static getDerivedStateFromError(error: Error): ErrorBoundaryState {
-    let friendlyMessage = 'Terjadi gangguan saat memproses data aplikasi.';
-    let detailText: string | null = error.message || null;
-
-    try {
-      const parsed = JSON.parse(error.message);
-      if (parsed && parsed.operationType) {
-        if (String(parsed.error || '').toLowerCase().includes('permission')) {
-          friendlyMessage =
-            'Akses ke database Cloud ditolak. Pastikan Anda login dengan akun Google yang sudah ditautkan oleh Admin.';
-        } else {
-          friendlyMessage = `Gagal menyinkronkan data (${parsed.operationType} pada ${parsed.path || 'database'}).`;
-        }
-        detailText = parsed.error || error.message;
-      }
-    } catch {
-      // Non-JSON error
-    }
-
     return {
       hasError: true,
-      message: friendlyMessage,
-      detail: detailText
+      message: 'Terjadi gangguan saat memproses data aplikasi.',
+      detail: error.message || null
     };
   }
 
@@ -62,7 +44,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
             </div>
             <div className="space-y-1.5">
               <h1 className="text-base font-extrabold text-slate-900">
-                Terjadi Kendala Koneksi / Akses Data
+                Terjadi Kendala Aplikasi
               </h1>
               <p className="text-xs text-slate-600 leading-relaxed">{this.state.message}</p>
             </div>

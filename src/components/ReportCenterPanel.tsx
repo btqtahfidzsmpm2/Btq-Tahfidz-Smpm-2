@@ -10,7 +10,6 @@ import {
   RaporSettings
 } from '../types';
 import { storage } from '../services/storage';
-import { cloudDb } from '../services/cloudDb';
 import { downloadRaporPdf, downloadClassSummaryPdf } from '../services/raporPdf';
 import { RaporPrintableSheet, ClassSummaryPrintableSheet } from './RaporPrintableSheet';
 import { detectBtqClassGender, isValidBtqClass } from '../utils/access';
@@ -293,11 +292,6 @@ export const ReportCenterPanel: React.FC<ReportCenterPanelProps> = ({
   const handleSaveSettings = (e: React.FormEvent) => {
     e.preventDefault();
     storage.saveRaporSettings(settings);
-    if (cloudDb.isCloudAuthenticated()) {
-      cloudDb.saveRaporSettingsCloud(settings).catch(err => {
-        onNotify('error', 'Gagal Sinkron Cloud', err?.message || 'Periksa izin Firestore.');
-      });
-    }
     setShowSettingsEditor(false);
     onNotify('success', 'Pengaturan Rapor Disimpan', 'Kop surat dan tanda tangan rapor diperbarui.');
   };
@@ -308,17 +302,12 @@ export const ReportCenterPanel: React.FC<ReportCenterPanelProps> = ({
     kelasLabel: string;
     jenisCetak: RaporPrintBatchLog['jenisCetak'];
   }) => {
-    const res = storage.recordRaporPrintBatch({
+    storage.recordRaporPrintBatch({
       ...params,
       semester: settings.semester,
       tahunAjaran: settings.tahunAjaran
     });
     refreshPrintState();
-    if (cloudDb.isCloudAuthenticated()) {
-      cloudDb.recordRaporPrintBatchCloud(res.updatedStatuses, res.newLog).catch(() => {
-        // Non-blocking background log sync
-      });
-    }
   };
 
   const triggerRaporPrint = (targetStudents: Student[], labelOverride?: string) => {
@@ -1105,9 +1094,6 @@ export const ReportCenterPanel: React.FC<ReportCenterPanelProps> = ({
                     onClick={() => {
                       storage.resetAllRaporStatuses();
                       refreshPrintState();
-                      if (cloudDb.isCloudAuthenticated()) {
-                        cloudDb.resetAllRaporStatusesCloud().catch(() => {});
-                      }
                       onNotify('info', 'Status Cetak Direset', 'Semua status cetak rapor diatur ulang menjadi Belum Dicetak.');
                     }}
                     className="px-3 py-1.5 text-xs font-bold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-xl flex items-center gap-1.5"
@@ -1371,9 +1357,6 @@ export const ReportCenterPanel: React.FC<ReportCenterPanelProps> = ({
                                     onClick={() => {
                                       storage.resetStudentRaporStatus(s.nisn);
                                       refreshPrintState();
-                                      if (cloudDb.isCloudAuthenticated()) {
-                                        cloudDb.resetStudentRaporStatusCloud(s.nisn).catch(() => {});
-                                      }
                                     }}
                                     className="p-1 text-slate-400 hover:text-rose-700 rounded"
                                     title="Reset status cetak siswa ini"
