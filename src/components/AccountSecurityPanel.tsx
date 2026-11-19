@@ -49,7 +49,7 @@ interface AccountSecurityPanelProps {
 }
 
 interface PendingApprovalDraft {
-  role: 'guru_ngaji' | 'guru_tahfidz' | 'wali_kelas';
+  role: 'admin' | 'guru_ngaji' | 'guru_tahfidz' | 'wali_kelas';
   teacherId: string;
   assignedClass: string;
   customNama: string;
@@ -345,15 +345,18 @@ export const AccountSecurityPanel: React.FC<AccountSecurityPanelProps> = ({
     try {
       const effectiveDir = [...staffDirectory];
       let teacherId = draft.teacherId || undefined;
+      let pickedTeacher: Teacher | undefined;
       let nama = draft.customNama.trim() || req.nama;
       let assignedGroup: string | undefined;
       let assignedTahfidzGroup: string | undefined;
       let assignedClass: string | undefined;
 
-      if (draft.role === 'wali_kelas') {
+      if (draft.role === 'admin') {
+        assignedGroup = '-';
+      } else if (draft.role === 'wali_kelas') {
         assignedClass = draft.assignedClass;
       } else {
-        const pickedTeacher = teachers.find(t => t.id === draft.teacherId);
+        pickedTeacher = teachers.find(t => t.id === draft.teacherId);
         if (pickedTeacher) {
           teacherId = pickedTeacher.id;
           nama = pickedTeacher.nama;
@@ -390,6 +393,7 @@ export const AccountSecurityPanel: React.FC<AccountSecurityPanelProps> = ({
         targetRole: draft.role,
         nama,
         teacherId,
+        teacherRecord: pickedTeacher,
         assignedGroup,
         assignedTahfidzGroup,
         assignedClass,
@@ -472,6 +476,33 @@ export const AccountSecurityPanel: React.FC<AccountSecurityPanelProps> = ({
       {/* CLOUD GOOGLE ACCESS REQUESTS & WALI KELAS BINDING (ADMIN CLOUD) */}
       {currentUser.role === 'admin' && currentUser.authProvider === 'google' && (
         <div className="space-y-4">
+          {/* Cloud Multi-Account Sync Guide & Share Link Card */}
+          <section className="bg-emerald-50/90 border border-emerald-200 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-2xs">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <Cloud className="w-4 h-4 text-emerald-700 shrink-0" />
+                <h3 className="text-xs sm:text-sm font-extrabold text-emerald-950">
+                  Sinkronisasi Multi-Akun Cloud Real-Time Aktif
+                </h3>
+              </div>
+              <p className="text-[11px] text-emerald-900 leading-relaxed">
+                Total <strong>{students.length} siswa</strong> tersinkron di Cloud.{' '}
+                <strong>{teachers.filter(t => Boolean(t.email)).length}/{teachers.length}</strong> Guru &amp;{' '}
+                <strong>{waliDirectoryEntries.length}</strong> Wali Kelas sudah memiliki email Google tertaut. Agar bisa sinkron di akun/perangkat lain, pengguna wajib klik <strong>Masuk dengan Akun Google</strong> (bukan username lokal).
+              </p>
+            </div>
+            {typeof window !== 'undefined' && (
+              <button
+                type="button"
+                onClick={() => copyText(window.location.origin, 'Link Portal SIM-Qur\'an')}
+                className="px-3.5 py-2 bg-emerald-800 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shrink-0 shadow-2xs"
+              >
+                <Copy className="w-3.5 h-3.5" />
+                <span>Salin Link Portal</span>
+              </button>
+            )}
+          </section>
+
           {pendingRequests.length > 0 && (
             <section className="bg-sky-50/90 border border-sky-200 rounded-2xl p-4 sm:p-5 space-y-4 shadow-2xs">
               <div className="flex items-center justify-between gap-2">
@@ -545,7 +576,7 @@ export const AccountSecurityPanel: React.FC<AccountSecurityPanelProps> = ({
                             value={draft.role}
                             onChange={e =>
                               updateDraftForRequest(req, {
-                                role: e.target.value as 'guru_ngaji' | 'guru_tahfidz' | 'wali_kelas',
+                                role: e.target.value as 'admin' | 'guru_ngaji' | 'guru_tahfidz' | 'wali_kelas',
                                 teacherId: ''
                               })
                             }
@@ -554,10 +585,15 @@ export const AccountSecurityPanel: React.FC<AccountSecurityPanelProps> = ({
                             <option value="guru_ngaji">Guru Ngaji (BTQ)</option>
                             <option value="guru_tahfidz">Guru Tahfidz</option>
                             <option value="wali_kelas">Wali Kelas (Read-Only)</option>
+                            <option value="admin">Administrator Tambahan (Co-Admin)</option>
                           </select>
                         </div>
 
-                        {draft.role === 'wali_kelas' ? (
+                        {draft.role === 'admin' ? (
+                          <div className="sm:col-span-2 flex items-center text-[11px] text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5">
+                            Akun ini akan mendapat akses penuh Administrator Cloud untuk seluruh siswa dan guru.
+                          </div>
+                        ) : draft.role === 'wali_kelas' ? (
                           <>
                             <div>
                               <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">

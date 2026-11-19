@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { User as FirebaseUser } from 'firebase/auth';
+import { doc, onSnapshot } from 'firebase/firestore';
 import { AccessRequest, Role, UserSession } from '../../types';
 import { authService } from '../../services/auth';
 import { cloudDb } from '../../services/cloudDb';
+import { db, sanitizeDocId } from '../../services/firebase';
 import {
   ShieldCheck,
   User,
@@ -44,7 +46,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
   const [unlinkedUser, setUnlinkedUser] = useState<FirebaseUser | null>(null);
   const [pendingRequest, setPendingRequest] = useState<AccessRequest | null>(null);
   const [reqNama, setReqNama] = useState('');
-  const [reqRole, setReqRole] = useState<'guru_ngaji' | 'guru_tahfidz' | 'wali_kelas'>('guru_ngaji');
+  const [reqRole, setReqRole] = useState<'admin' | 'guru_ngaji' | 'guru_tahfidz' | 'wali_kelas'>('guru_ngaji');
   const [reqNote, setReqNote] = useState('');
   const [reqSuccessMsg, setReqSuccessMsg] = useState<string | null>(null);
 
@@ -79,6 +81,52 @@ export const LoginModal: React.FC<LoginModalProps> = ({
     }, 1000);
     return () => clearInterval(timer);
   }, [lockedSeconds]);
+
+  // Auto-detect Admin approval in real time while waiting on the unlinked Google screen
+  useEffect(() => {
+    if (!isOpen || !unlinkedUser) return;
+    const uid = sanitizeDocId(unlinkedUser.uid, 128);
+    let handled = false;
+
+    const tryAutoAuthorize = async () => {
+      if (handled) return;
+      try {
+        const res = await cloudDb.resolveGoogleUserSession(unlinkedUser);
+        if (res.status === 'authorized' && res.session && !handled) {
+          handled = true;
+          onLogin(res.session);
+          onClose();
+        }
+      } catch {
+        // ignore transient checks
+      }
+    };
+
+    const unsubStaff = onSnapshot(
+      doc(db, 'staffUsers', uid),
+      snap => {
+        if (snap.exists() && snap.data()?.isActive !== false) {
+          void tryAutoAuthorize();
+        }
+      },
+      () => {}
+    );
+
+    const unsubAdmin = onSnapshot(
+      doc(db, 'admins', uid),
+      snap => {
+        if (snap.exists()) {
+          void tryAutoAuthorize();
+        }
+      },
+      () => {}
+    );
+
+    return () => {
+      unsubStaff();
+      unsubAdmin();
+    };
+  }, [isOpen, unlinkedUser, onLogin, onClose]);
 
   if (!isOpen) return null;
 
@@ -203,6 +251,28 @@ export const LoginModal: React.FC<LoginModalProps> = ({
       );
     } catch (err: any) {
       setError(err?.message || 'Gagal mengirim permintaan akses.');
+    } finally {
+      setIsGoogleLoading(false);
+    }
+  };
+
+  const handleCheckApprovalNow = async () => {
+    if (!unlinkedUser || isGoogleLoading) return;
+    setError(null);
+    setIsGoogleLoading(true);
+    try {
+      const res = await cloudDb.resolveGoogleUserSession(unlinkedUser);
+      if (res.status === 'authorized' && res.session) {
+        onLogin(res.session);
+        onClose();
+        return;
+      }
+      if (res.pendingRequest) {
+        setPendingRequest(res.pendingRequest);
+      }
+      setError('Akses Anda belum disetujui Admin. Pastikan Admin sudah menekan "Setujui & Tautkan Akun" di Dashboard.');
+    } catch (err: any) {
+      setError(err?.message || 'Gagal memeriksa status persetujuan.');
     } finally {
       setIsGoogleLoading(false);
     }
@@ -351,13 +421,14 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                 <select
                   value={reqRole}
                   onChange={e =>
-                    setReqRole(e.target.value as 'guru_ngaji' | 'guru_tahfidz' | 'wali_kelas')
+                    setReqRole(e.target.value as 'admin' | 'guru_ngaji' | 'guru_tahfidz' | 'wali_kelas')
                   }
                   className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs font-semibold text-slate-900 bg-white focus:outline-none focus:ring-2 focus:ring-emerald-600"
                 >
                   <option value="guru_ngaji">Guru Ngaji (Kelas BTQ)</option>
                   <option value="guru_tahfidz">Guru Tahfidz (Program Tahfidz)</option>
                   <option value="wali_kelas">Wali Kelas Formal (Pantau Report)</option>
+                  <option value="admin">Administrator Tambahan (Co-Admin)</option>
                 </select>
               </div>
 
@@ -375,7 +446,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                 />
               </div>
 
-              <div className="flex items-center gap-2 pt-1">
+              <div className="flex flex-wrap items-center gap-2 pt-1">
                 <button
                   type="button"
                   onClick={handleSwitchGoogleAccount}
@@ -399,6 +470,16 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                   </span>
                 </button>
               </div>
+              {pendingRequest?.status === 'pending' && (
+                <button
+                  type="button"
+                  onClick={handleCheckApprovalNow}
+                  disabled={isGoogleLoading}
+                  className="w-full py-2 px-3 bg-sky-50 hover:bg-sky-100 text-sky-900 border border-sky-200 rounded-xl text-[11px] font-bold transition-colors"
+                >
+                  Sudah disetujui Admin? Cek Status &amp; Masuk Otomatis
+                </button>
+              )}
             </form>
           </div>
         ) : (
@@ -484,7 +565,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
             <div className="relative flex items-center py-1">
               <div className="flex-grow border-t border-slate-200" />
               <span className="shrink mx-3 text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                atau akun lokal perangkat
+                atau mode offline lokal perangkat
               </span>
               <div className="flex-grow border-t border-slate-200" />
             </div>
@@ -586,10 +667,10 @@ export const LoginModal: React.FC<LoginModalProps> = ({
               </div>
 
               {/* Security Note */}
-              <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200/80 flex items-start gap-2">
-                <ShieldCheck className="w-4 h-4 text-emerald-700 shrink-0 mt-0.5" />
-                <p className="text-[11px] text-slate-600 leading-relaxed">
-                  Untuk sinkronisasi multi-perangkat secara online, gunakan <strong>Masuk dengan Akun Google</strong>. Login username lokal hanya untuk perangkat ini.
+              <div className="p-2.5 rounded-xl bg-amber-50/70 border border-amber-200/80 flex items-start gap-2">
+                <ShieldCheck className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
+                <p className="text-[11px] text-amber-900 leading-relaxed">
+                  <strong>Penting:</strong> Login username di atas hanya menyimpan data secara lokal di browser ini (tidak sinkron ke akun/HP lain). Untuk sinkronisasi real-time antar akun &amp; perangkat, gunakan <strong>Masuk dengan Akun Google</strong> di bagian atas.
                 </p>
               </div>
 

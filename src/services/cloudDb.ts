@@ -40,12 +40,19 @@ import {
   Role,
   UjianRecord
 } from '../types';
-import { matchesTeacherName } from '../utils/access';
+import {
+  matchesTeacherName,
+  splitGroupTokens,
+  normalizeBtqGroupToken,
+  formatBtqClassWithGender,
+  detectBtqClassGender,
+  isValidBtqClass
+} from '../utils/access';
 
 export interface StaffDirectoryRecord {
   id: string;
   nama: string;
-  role: 'guru_ngaji' | 'guru_tahfidz' | 'wali_kelas';
+  role: 'admin' | 'guru_ngaji' | 'guru_tahfidz' | 'wali_kelas';
   kelompokBTQ: string;
   kelompokTahfidz?: string;
   assignedClass?: string;
@@ -118,29 +125,78 @@ function buildUjianPayload(u: UjianRecord) {
  * - editorEmails: Admin + Guru BTQ + Guru Tahfidz ONLY (max 15, omits Wali Kelas!)
  */
 export function computeStudentAcl(
-  student: Pick<Student, 'pengajar' | 'pembimbingTahfidz' | 'isTahfidz' | 'kelas' | 'waliKelas'>,
+  student: Pick<
+    Student,
+    | 'pengajar'
+    | 'pembimbingTahfidz'
+    | 'isTahfidz'
+    | 'kelas'
+    | 'kelasBTQ'
+    | 'gender'
+    | 'halaqahTahfidz'
+    | 'waliKelas'
+  >,
   staffDir: StaffDirectoryRecord[]
 ): StudentAcl {
   const authorized = new Set<string>([BOOTSTRAP_ADMIN_EMAIL]);
   const editors = new Set<string>([BOOTSTRAP_ADMIN_EMAIL]);
 
+  const sBtqValid = isValidBtqClass(student.kelasBTQ);
+  const sBtqNorm = sBtqValid ? formatBtqClassWithGender(student.kelasBTQ, student.gender) : '';
+  const sBtqRawUpper = (student.kelasBTQ || '').trim().toUpperCase().replace(/\s+/g, ' ');
+  const sBtqGender = sBtqValid ? detectBtqClassGender(sBtqNorm, student.gender) : null;
+  const rawPengajar = (student.pengajar || '').trim();
+  const hasExplicitPengajar = Boolean(
+    rawPengajar && rawPengajar !== '-' && rawPengajar.toUpperCase() !== 'GURU BTQ'
+  );
+
+  const rawPembimbing = (student.pembimbingTahfidz || '').trim();
+  const hasExplicitPembimbing = Boolean(rawPembimbing && rawPembimbing !== '-');
+  const sHalaqah = (student.halaqahTahfidz || '').trim().toUpperCase().replace(/\s+/g, ' ');
+
   staffDir.forEach(staff => {
     const email = normalizeEmail(staff.email);
     if (!email || !email.includes('@')) return;
 
-    if (staff.role === 'guru_ngaji') {
-      if (matchesTeacherName(student.pengajar, staff.nama)) {
+    if (staff.role === 'admin') {
+      authorized.add(email);
+      editors.add(email);
+    } else if (staff.role === 'guru_ngaji') {
+      let matched = matchesTeacherName(student.pengajar, staff.nama);
+      if (!matched && !hasExplicitPengajar && sBtqValid) {
+        const groupTokens = splitGroupTokens(staff.kelompokBTQ).map(normalizeBtqGroupToken);
+        const allowedGenders = new Set<'PI' | 'PA'>();
+        groupTokens.forEach(tok => {
+          const g = detectBtqClassGender(tok);
+          if (g) allowedGenders.add(g);
+        });
+        const genderOk =
+          allowedGenders.size === 0 || !sBtqGender || allowedGenders.has(sBtqGender);
+        if (genderOk && groupTokens.some(token => token === sBtqNorm || token === sBtqRawUpper)) {
+          matched = true;
+        }
+      }
+      if (matched) {
         authorized.add(email);
         editors.add(email);
       }
     } else if (staff.role === 'guru_tahfidz') {
-      if (
-        student.isTahfidz &&
-        (matchesTeacherName(student.pembimbingTahfidz, staff.nama) ||
-          matchesTeacherName(student.pengajar, staff.nama))
-      ) {
-        authorized.add(email);
-        editors.add(email);
+      if (student.isTahfidz) {
+        let matched =
+          matchesTeacherName(student.pembimbingTahfidz, staff.nama) ||
+          matchesTeacherName(student.pengajar, staff.nama);
+        if (!matched && !hasExplicitPembimbing && sHalaqah) {
+          const tahfidzTokens = splitGroupTokens(
+            staff.kelompokTahfidz || staff.kelompokBTQ
+          ).map(normalizeBtqGroupToken);
+          if (tahfidzTokens.some(tok => tok === sHalaqah)) {
+            matched = true;
+          }
+        }
+        if (matched) {
+          authorized.add(email);
+          editors.add(email);
+        }
       }
     } else if (staff.role === 'wali_kelas') {
       const studentClass = (student.kelas || '').trim().toUpperCase();
@@ -266,7 +322,17 @@ function fromDocStudent(data: Record<string, any>): Student {
 
 async function resolveStudentAcl(
   nisn: string,
-  fallbackStudent?: Pick<Student, 'pengajar' | 'pembimbingTahfidz' | 'isTahfidz' | 'kelas' | 'waliKelas'>,
+  fallbackStudent?: Pick<
+    Student,
+    | 'pengajar'
+    | 'pembimbingTahfidz'
+    | 'isTahfidz'
+    | 'kelas'
+    | 'kelasBTQ'
+    | 'gender'
+    | 'halaqahTahfidz'
+    | 'waliKelas'
+  >,
   staffDir: StaffDirectoryRecord[] = []
 ): Promise<StudentAcl> {
   const safeNisn = sanitizeDocId(nisn, 40);
@@ -488,26 +554,38 @@ export const cloudDb = {
       const qDir = query(collection(db, 'staffDirectory'), where('email', '==', email));
       const dirSnap = await getDocs(qDir);
       if (!dirSnap.empty) {
-        const first = dirSnap.docs[0].data();
+        const docs = dirSnap.docs.map(d => d.data());
+        const first = docs[0];
         const role = first.role as Role;
-        return {
-          status: 'authorized',
-          firebaseUser: fbUser,
-          session: {
-            accountId: uid,
-            authUid: uid,
-            authProvider: 'google',
-            email,
-            username: email.split('@')[0],
-            role,
-            nama: String(first.nama || displayName),
-            assignedGroup: first.kelompokBTQ,
-            assignedTahfidzGroup: first.kelompokTahfidz,
-            assignedClass: first.assignedClass,
-            isDefaultPassword: false,
-            loginAt: Date.now()
-          }
-        };
+        // Pre-registered non-admin directory entries can log in immediately;
+        // Co-Admins still require /admins/{uid} approval via Bootstrap Admin for write rules.
+        if (role !== 'admin') {
+          const combinedBtq = Array.from(
+            new Set(docs.map(d => String(d.kelompokBTQ || '')).filter(v => v && v !== '-'))
+          ).join(', ');
+          const combinedTahfidz = Array.from(
+            new Set(docs.map(d => String(d.kelompokTahfidz || '')).filter(Boolean))
+          ).join(', ');
+
+          return {
+            status: 'authorized',
+            firebaseUser: fbUser,
+            session: {
+              accountId: uid,
+              authUid: uid,
+              authProvider: 'google',
+              email,
+              username: email.split('@')[0],
+              role,
+              nama: String(first.nama || displayName),
+              assignedGroup: combinedBtq || first.kelompokBTQ,
+              assignedTahfidzGroup: combinedTahfidz || first.kelompokTahfidz,
+              assignedClass: first.assignedClass,
+              isDefaultPassword: false,
+              loginAt: Date.now()
+            }
+          };
+        }
       }
     } catch (error) {
       handleFirestoreError(error, OperationType.LIST, 'staffDirectory');
@@ -542,7 +620,7 @@ export const cloudDb = {
   async submitAccessRequest(params: {
     fbUser: FirebaseUser;
     nama: string;
-    requestedRole: 'guru_ngaji' | 'guru_tahfidz' | 'wali_kelas';
+    requestedRole: 'admin' | 'guru_ngaji' | 'guru_tahfidz' | 'wali_kelas';
     requestedNote: string;
   }): Promise<AccessRequest> {
     const uid = sanitizeDocId(params.fbUser.uid, 128);
@@ -593,6 +671,7 @@ export const cloudDb = {
     const unsubs: Unsubscribe[] = [];
     const email = normalizeEmail(session.email || auth.currentUser?.email);
     const isAdmin = session.role === 'admin';
+    const isBootstrap = isAdmin && email === BOOTSTRAP_ADMIN_EMAIL;
 
     const onError = (path: string) => (err: Error) => {
       // Suppress transient errors when user just signed out
@@ -606,8 +685,8 @@ export const cloudDb = {
       }
     };
 
-    // 1. Students listener
-    const studentsQuery = isAdmin
+    // 1. Students listener (Bootstrap Admin gets full collection; Co-Admin & Teachers use authorizedEmails array-contains)
+    const studentsQuery = isBootstrap
       ? collection(db, 'students')
       : query(collection(db, 'students'), where('authorizedEmails', 'array-contains', email));
 
@@ -623,7 +702,7 @@ export const cloudDb = {
     );
 
     // 2. Staff directory listener (Teachers & Wali Kelas)
-    const dirQuery = isAdmin
+    const dirQuery = isBootstrap
       ? collection(db, 'staffDirectory')
       : query(collection(db, 'staffDirectory'), where('email', '==', email));
 
@@ -671,7 +750,7 @@ export const cloudDb = {
     );
 
     // 3. Bacaan listener
-    const bacaanQuery = isAdmin
+    const bacaanQuery = isBootstrap
       ? collection(db, 'bacaan')
       : query(collection(db, 'bacaan'), where('authorizedEmails', 'array-contains', email));
 
@@ -701,7 +780,7 @@ export const cloudDb = {
     );
 
     // 4. Tahfidz listener
-    const tahfidzQuery = isAdmin
+    const tahfidzQuery = isBootstrap
       ? collection(db, 'tahfidz')
       : query(collection(db, 'tahfidz'), where('authorizedEmails', 'array-contains', email));
 
@@ -731,7 +810,7 @@ export const cloudDb = {
     );
 
     // 5. Absensi listener
-    const absensiQuery = isAdmin
+    const absensiQuery = isBootstrap
       ? collection(db, 'absensi')
       : query(collection(db, 'absensi'), where('authorizedEmails', 'array-contains', email));
 
@@ -757,7 +836,7 @@ export const cloudDb = {
       )
     );
 
-    // 6. Admin-only listeners: raporConfig, raporStatuses, raporLogs, accessRequests
+    // 6. Admin raporConfig/main get listener (allowed for all verified Admins)
     if (isAdmin) {
       unsubs.push(
         onSnapshot(
@@ -778,6 +857,10 @@ export const cloudDb = {
           onError('raporConfig/main')
         )
       );
+    }
+
+    // 7. Bootstrap-Admin-only list listeners: raporStatuses, raporLogs, accessRequests
+    if (isBootstrap) {
 
       unsubs.push(
         onSnapshot(
@@ -1546,6 +1629,7 @@ export const cloudDb = {
     targetRole: Role;
     nama: string;
     teacherId?: string;
+    teacherRecord?: Teacher;
     assignedGroup?: string;
     assignedTahfidzGroup?: string;
     assignedClass?: string;
@@ -1555,6 +1639,37 @@ export const cloudDb = {
     const uid = sanitizeDocId(params.request.uid, 128);
     const email = normalizeEmail(params.request.email);
     const ops: BatchOp[] = [];
+
+    // 0. If approving as Co-Admin, register /admins/{uid} (only allowed for Bootstrap Admin)
+    if (params.targetRole === 'admin') {
+      const adminRef = doc(db, 'admins', uid);
+      try {
+        const adminSnap = await getDoc(adminRef);
+        if (!adminSnap.exists()) {
+          ops.push({
+            type: 'set',
+            ref: adminRef,
+            data: {
+              uid,
+              email,
+              nama: clampStr(params.nama, 120),
+              createdAt: serverTimestamp()
+            }
+          });
+        }
+      } catch {
+        ops.push({
+          type: 'set',
+          ref: adminRef,
+          data: {
+            uid,
+            email,
+            nama: clampStr(params.nama, 120),
+            createdAt: serverTimestamp()
+          }
+        });
+      }
+    }
 
     // 1. Create/Update /staffUsers/{uid}
     const staffUserRef = doc(db, 'staffUsers', uid);
@@ -1598,15 +1713,40 @@ export const cloudDb = {
 
     // 3. Upsert matching /staffDirectory entry with Google email
     const nextDir = [...params.staffDir];
-    if (params.teacherId) {
-      const idx = nextDir.findIndex(d => d.id === params.teacherId);
+    if (params.targetRole === 'admin') {
+      const adminDirId = sanitizeDocId(`admin-${uid}`, 128);
+      const adminDirEntry: StaffDirectoryRecord = {
+        id: adminDirId,
+        nama: clampStr(params.nama, 120),
+        role: 'admin',
+        kelompokBTQ: '-',
+        ruangan: 'ADMIN CLOUD',
+        email
+      };
+      const idx = nextDir.findIndex(d => d.id === adminDirId);
+      if (idx !== -1) nextDir[idx] = adminDirEntry;
+      else nextDir.push(adminDirEntry);
+      await this.saveStaffDirectoryBatch([adminDirEntry]);
+    } else if (params.teacherId) {
+      const safeTeacherId = sanitizeDocId(params.teacherId, 128);
+      const idx = nextDir.findIndex(d => d.id === safeTeacherId || d.id === params.teacherId);
       if (idx !== -1) {
-        nextDir[idx] = { ...nextDir[idx], email };
-        ops.push({
-          type: 'update',
-          ref: doc(db, 'staffDirectory', sanitizeDocId(params.teacherId, 128)),
-          data: { email, updatedAt: serverTimestamp() }
-        });
+        const updatedEntry: StaffDirectoryRecord = { ...nextDir[idx], id: safeTeacherId, email };
+        nextDir[idx] = updatedEntry;
+        await this.saveStaffDirectoryBatch([updatedEntry]);
+      } else if (params.teacherRecord) {
+        const newEntry: StaffDirectoryRecord = {
+          id: safeTeacherId,
+          nama: params.teacherRecord.nama,
+          role: params.teacherRecord.role,
+          kelompokBTQ: params.teacherRecord.kelompokBTQ || '-',
+          kelompokTahfidz: params.teacherRecord.kelompokTahfidz,
+          ruangan: params.teacherRecord.ruangan || '-',
+          kontak: params.teacherRecord.kontak,
+          email
+        };
+        nextDir.push(newEntry);
+        await this.saveStaffDirectoryBatch([newEntry]);
       }
     } else if (params.targetRole === 'wali_kelas' && params.assignedClass) {
       const waliId = sanitizeDocId(`wali-${params.assignedClass.toLowerCase()}`, 128);

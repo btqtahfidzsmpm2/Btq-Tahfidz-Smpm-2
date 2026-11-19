@@ -83,6 +83,7 @@ interface TeacherDashboardProps {
   hasLocalDataToPush?: boolean;
   isPushingToCloud?: boolean;
   onPushLocalToCloud?: () => Promise<void>;
+  onOpenLoginModal?: () => void;
   onRefreshAccounts: () => void;
   onOpenChangePasswordModal: () => void;
   onOpenBacaanModal: (student?: Student) => void;
@@ -122,6 +123,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   hasLocalDataToPush = false,
   isPushingToCloud = false,
   onPushLocalToCloud,
+  onOpenLoginModal,
   onRefreshAccounts,
   onOpenChangePasswordModal,
   onOpenBacaanModal,
@@ -419,6 +421,35 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   return (
     <div className="space-y-6">
       <div className="no-print space-y-6">
+
+      {/* Offline Local Auth Notice Banner (reminds user to connect Google for cross-account Cloud sync) */}
+      {user.authProvider !== 'google' && (
+        <section className="bg-sky-50 border border-sky-200 rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-2xs">
+          <div className="flex items-start gap-3">
+            <div className="w-8 h-8 rounded-xl bg-sky-700 text-white flex items-center justify-center shrink-0">
+              <Cloud className="w-4 h-4" />
+            </div>
+            <div>
+              <h3 className="text-xs font-extrabold text-sky-950">
+                Mode Lokal Perangkat (Belum Tersinkron ke Akun / HP Lain)
+              </h3>
+              <p className="text-[11px] text-sky-900 mt-0.5 leading-relaxed">
+                Anda masuk dengan akun lokal perangkat. Agar perubahan data tersimpan ke Cloud dan sinkron saat dibuka di akun/perangkat lain, hubungkan akun Google Anda.
+              </p>
+            </div>
+          </div>
+          {onOpenLoginModal && (
+            <button
+              type="button"
+              onClick={onOpenLoginModal}
+              className="px-3.5 py-2 bg-sky-700 hover:bg-sky-800 text-white font-bold rounded-xl text-xs transition-colors flex items-center gap-1.5 shrink-0 shadow-2xs"
+            >
+              <Cloud className="w-3.5 h-3.5" />
+              <span>Hubungkan Akun Google</span>
+            </button>
+          )}
+        </section>
+      )}
 
       {/* Default Password Security Alert Banner (Local Auth only) */}
       {user.isDefaultPassword && user.authProvider !== 'google' && (

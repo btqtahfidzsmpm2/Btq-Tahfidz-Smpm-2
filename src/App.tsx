@@ -21,7 +21,7 @@ import {
 } from './types';
 import { storage } from './services/storage';
 import { authService } from './services/auth';
-import { auth, testConnection } from './services/firebase';
+import { auth, BOOTSTRAP_ADMIN_EMAIL, testConnection } from './services/firebase';
 import { cloudDb, StaffDirectoryRecord } from './services/cloudDb';
 import {
   getAuthorizedStudents,
@@ -74,6 +74,7 @@ export default function App() {
 
   const cloudUnsubRef = useRef<(() => void) | null>(null);
   const activeCloudUidRef = useRef<string | null>(null);
+  const autoPushAttemptedRef = useRef<boolean>(false);
   const cloudCountsRef = useRef<{ students: number; teachers: number }>({
     students: -1,
     teachers: -1
@@ -183,9 +184,15 @@ export default function App() {
 
     stopCloudSubscription();
     activeCloudUidRef.current = targetUid;
+    autoPushAttemptedRef.current = false;
     cloudCountsRef.current = { students: -1, teachers: -1 };
+    setSelectedStudent(null);
 
-    if (session.role === 'admin') {
+    const isBootstrapAdmin =
+      session.role === 'admin' &&
+      (session.email || '').trim().toLowerCase() === BOOTSTRAP_ADMIN_EMAIL;
+
+    if (isBootstrapAdmin) {
       const localStds = storage.getStudents();
       const localTchs = storage.getTeachers();
       if (localStds.length > 0 || localTchs.length > 0) {
@@ -201,20 +208,40 @@ export default function App() {
         localSnapshotForPushRef.current = null;
         setHasLocalDataToPush(false);
       }
+    } else {
+      localSnapshotForPushRef.current = null;
+      setHasLocalDataToPush(false);
     }
+
+    const maybeTriggerAutoPush = () => {
+      if (
+        !isBootstrapAdmin ||
+        !localSnapshotForPushRef.current ||
+        localSnapshotForPushRef.current.students.length === 0
+      ) {
+        return false;
+      }
+      const studentsSettled = cloudCountsRef.current.students !== -1;
+      if (studentsSettled && cloudCountsRef.current.students === 0) {
+        setHasLocalDataToPush(true);
+        if (!autoPushAttemptedRef.current) {
+          autoPushAttemptedRef.current = true;
+          void handlePushLocalToCloud();
+        }
+        return true;
+      }
+      return false;
+    };
 
     cloudUnsubRef.current = cloudDb.subscribeCloudData(session, {
       onStudents: list => {
         cloudCountsRef.current.students = list.length;
-        const cloudHasData =
-          cloudCountsRef.current.students > 0 || cloudCountsRef.current.teachers > 0;
 
-        if (!cloudHasData && session.role === 'admin' && localSnapshotForPushRef.current) {
-          setHasLocalDataToPush(true);
+        if (maybeTriggerAutoPush()) {
           return;
         }
 
-        if (cloudHasData) {
+        if (list.length > 0) {
           localSnapshotForPushRef.current = null;
           setHasLocalDataToPush(false);
         }
@@ -228,17 +255,15 @@ export default function App() {
       },
       onTeachers: async list => {
         cloudCountsRef.current.teachers = list.length;
-        const cloudHasData =
-          cloudCountsRef.current.students > 0 || cloudCountsRef.current.teachers > 0;
 
-        if (!cloudHasData && session.role === 'admin' && localSnapshotForPushRef.current) {
-          setHasLocalDataToPush(true);
+        if (
+          isBootstrapAdmin &&
+          localSnapshotForPushRef.current &&
+          localSnapshotForPushRef.current.students.length > 0 &&
+          cloudCountsRef.current.students <= 0
+        ) {
+          maybeTriggerAutoPush();
           return;
-        }
-
-        if (cloudHasData) {
-          localSnapshotForPushRef.current = null;
-          setHasLocalDataToPush(false);
         }
 
         storage.saveTeachers(list);
@@ -252,9 +277,10 @@ export default function App() {
       onBacaan: list => {
         if (
           list.length === 0 &&
+          isBootstrapAdmin &&
           cloudCountsRef.current.students <= 0 &&
-          cloudCountsRef.current.teachers <= 0 &&
-          localSnapshotForPushRef.current
+          localSnapshotForPushRef.current &&
+          localSnapshotForPushRef.current.students.length > 0
         ) {
           return;
         }
@@ -264,9 +290,10 @@ export default function App() {
       onTahfidz: list => {
         if (
           list.length === 0 &&
+          isBootstrapAdmin &&
           cloudCountsRef.current.students <= 0 &&
-          cloudCountsRef.current.teachers <= 0 &&
-          localSnapshotForPushRef.current
+          localSnapshotForPushRef.current &&
+          localSnapshotForPushRef.current.students.length > 0
         ) {
           return;
         }
@@ -276,9 +303,10 @@ export default function App() {
       onAbsensi: list => {
         if (
           list.length === 0 &&
+          isBootstrapAdmin &&
           cloudCountsRef.current.students <= 0 &&
-          cloudCountsRef.current.teachers <= 0 &&
-          localSnapshotForPushRef.current
+          localSnapshotForPushRef.current &&
+          localSnapshotForPushRef.current.students.length > 0
         ) {
           return;
         }
@@ -485,6 +513,9 @@ export default function App() {
     }
     authService.logout();
     setUser(null);
+    setSelectedStudent(null);
+    setStaffDirectory([]);
+    setAccessRequests([]);
     setHasLocalDataToPush(false);
     localSnapshotForPushRef.current = null;
     setCurrentView('public');
@@ -644,6 +675,7 @@ export default function App() {
             hasLocalDataToPush={hasLocalDataToPush}
             isPushingToCloud={isPushingToCloud}
             onPushLocalToCloud={handlePushLocalToCloud}
+            onOpenLoginModal={() => setShowLoginModal(true)}
             onRefreshAccounts={refreshAccounts}
             onOpenChangePasswordModal={() => setShowChangePasswordModal(true)}
             onOpenBacaanModal={student => {

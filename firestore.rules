@@ -83,7 +83,7 @@ service cloud.firestore {
         data.keys().hasOnly(['id', 'nama', 'role', 'kelompokBTQ', 'kelompokTahfidz', 'assignedClass', 'ruangan', 'kontak', 'email', 'createdAt', 'updatedAt']) &&
         isValidId(data.id) &&
         data.nama is string && data.nama.size() >= 1 && data.nama.size() <= 120 &&
-        data.role in ['guru_ngaji', 'guru_tahfidz', 'wali_kelas'] &&
+        data.role in ['admin', 'guru_ngaji', 'guru_tahfidz', 'wali_kelas'] &&
         data.kelompokBTQ is string && data.kelompokBTQ.size() <= 200 &&
         isOptionalString(data, 'kelompokTahfidz', 200) &&
         isOptionalString(data, 'assignedClass', 30) &&
@@ -100,7 +100,7 @@ service cloud.firestore {
         isValidId(data.uid) &&
         data.email is string && data.email.size() >= 3 && data.email.size() <= 150 &&
         data.nama is string && data.nama.size() >= 1 && data.nama.size() <= 120 &&
-        data.requestedRole in ['guru_ngaji', 'guru_tahfidz', 'wali_kelas'] &&
+        data.requestedRole in ['admin', 'guru_ngaji', 'guru_tahfidz', 'wali_kelas'] &&
         data.requestedNote is string && data.requestedNote.size() <= 200 &&
         data.status in ['pending', 'approved', 'rejected'] &&
         data.createdAt is timestamp &&
@@ -331,7 +331,7 @@ service cloud.firestore {
     // Teacher & homeroom directory (PII protected: matching email or admin)
     match /staffDirectory/{staffId} {
       allow get: if isVerifiedUser() && isValidId(staffId) && (isAdmin() || (('email' in existing()) && existing().email == request.auth.token.email.lower()));
-      allow list: if isVerifiedUser() && (isBootstrapAdmin() || (('email' in existing()) && existing().email == request.auth.token.email.lower()));
+      allow list: if isVerifiedUser() && (isBootstrapAdmin() || existing().email == request.auth.token.email.lower());
       allow create: if isAdmin() && isValidId(staffId) && isValidStaffDirectoryItem(incoming()) && incoming().id == staffId && incoming().createdAt == request.time && incoming().updatedAt == request.time;
       allow update: if isAdmin() && isValidId(staffId) && isValidStaffDirectoryItem(incoming()) && incoming().id == existing().id && incoming().createdAt == existing().createdAt && incoming().updatedAt == request.time;
       allow delete: if isAdmin() && isValidId(staffId);

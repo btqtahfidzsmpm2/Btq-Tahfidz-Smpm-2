@@ -88,10 +88,10 @@ export const PublicPortal: React.FC<PublicPortalProps> = ({
     : [];
 
   const hadirCount = studentAbsensi.filter(a => a.status === 'Hadir').length;
-  const totalSesi = studentAbsensi.length || 18;
-  const presensiPersen = studentAbsensi.length
+  const totalSesi = studentAbsensi.length;
+  const presensiPersen = totalSesi > 0
     ? Math.round((hadirCount / totalSesi) * 100)
-    : selectedStudent?.kehadiranPersen || 100;
+    : selectedStudent?.kehadiranPersen ?? 100;
 
   return (
     <div className="space-y-6">
@@ -298,7 +298,7 @@ export const PublicPortal: React.FC<PublicPortalProps> = ({
                     : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
-                Presensi ({studentAbsensi.length || 8})
+                Presensi ({studentAbsensi.length > 0 ? studentAbsensi.length : `${presensiPersen}%`})
               </button>
             </div>
 
@@ -432,25 +432,33 @@ export const PublicPortal: React.FC<PublicPortalProps> = ({
                 <div className="p-4 grid grid-cols-2 sm:grid-cols-4 gap-3 bg-slate-50/50 border-b border-slate-200 text-xs">
                   <div>
                     <span className="text-slate-500">Hadir:</span>{' '}
-                    <strong className="text-emerald-700 font-mono">{hadirCount || 18} Sesi</strong>
+                    <strong className="text-emerald-700 font-mono">
+                      {studentAbsensi.length > 0 ? `${hadirCount} Sesi` : `${presensiPersen}%`}
+                    </strong>
                   </div>
                   <div>
                     <span className="text-slate-500">Sakit:</span>{' '}
-                    <strong className="text-blue-700 font-mono">0 Sesi</strong>
+                    <strong className="text-blue-700 font-mono">
+                      {studentAbsensi.filter(a => a.status === 'Sakit').length} Sesi
+                    </strong>
                   </div>
                   <div>
                     <span className="text-slate-500">Izin:</span>{' '}
-                    <strong className="text-amber-700 font-mono">0 Sesi</strong>
+                    <strong className="text-amber-700 font-mono">
+                      {studentAbsensi.filter(a => a.status === 'Izin').length} Sesi
+                    </strong>
                   </div>
                   <div>
                     <span className="text-slate-500">Alpa:</span>{' '}
-                    <strong className="text-rose-700 font-mono">0 Sesi</strong>
+                    <strong className="text-rose-700 font-mono">
+                      {studentAbsensi.filter(a => a.status === 'Alpa').length} Sesi
+                    </strong>
                   </div>
                 </div>
 
                 <div className="p-4 text-xs text-slate-600">
                   <p className="leading-relaxed">
-                    Siswa terdaftar aktif pada jadwal halaqah BTQ dan Tahfidz di {selectedStudent.ruangan} di bawah bimbingan {selectedStudent.pengajar}. Presensi tercatat 100% aktif.
+                    Siswa terdaftar aktif pada jadwal halaqah BTQ dan Tahfidz di {selectedStudent.ruangan} di bawah bimbingan {selectedStudent.pengajar}. Tingkat kehadiran tercatat {presensiPersen}%.
                   </p>
                 </div>
               </div>

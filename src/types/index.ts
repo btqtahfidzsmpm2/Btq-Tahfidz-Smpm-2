@@ -71,7 +71,7 @@ export interface AccessRequest {
   uid: string;
   email: string;
   nama: string;
-  requestedRole: 'guru_ngaji' | 'guru_tahfidz' | 'wali_kelas';
+  requestedRole: 'admin' | 'guru_ngaji' | 'guru_tahfidz' | 'wali_kelas';
   requestedNote: string;
   status: 'pending' | 'approved' | 'rejected';
 }

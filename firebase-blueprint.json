@@ -101,7 +101,7 @@
         },
         "role": {
           "type": "string",
-          "enum": ["guru_ngaji", "guru_tahfidz", "wali_kelas"]
+          "enum": ["admin", "guru_ngaji", "guru_tahfidz", "wali_kelas"]
         },
         "kelompokBTQ": {
           "type": "string",
@@ -161,7 +161,7 @@
         },
         "requestedRole": {
           "type": "string",
-          "enum": ["guru_ngaji", "guru_tahfidz", "wali_kelas"]
+          "enum": ["admin", "guru_ngaji", "guru_tahfidz", "wali_kelas"]
         },
         "requestedNote": {
           "type": "string",
