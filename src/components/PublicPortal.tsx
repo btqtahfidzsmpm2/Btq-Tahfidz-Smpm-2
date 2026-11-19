@@ -1,6 +1,13 @@
 import React, { useState } from 'react';
-import { Student, BacaanRecord, TahfidzRecord, AbsensiRecord } from '../types';
-import { Search, BookOpen, Award, CheckCircle2, User } from 'lucide-react';
+import {
+  Student,
+  BacaanRecord,
+  TahfidzRecord,
+  AbsensiRecord,
+  PublicStudentReport
+} from '../types';
+import { cloudDb } from '../services/cloudDb';
+import { Search, BookOpen, Award, CheckCircle2, User, Cloud } from 'lucide-react';
 
 interface PublicPortalProps {
   students: Student[];
@@ -23,51 +30,157 @@ export const PublicPortal: React.FC<PublicPortalProps> = ({
 }) => {
   const [query, setQuery] = useState('');
   const [activeTab, setActiveTab] = useState<'bacaan' | 'tahfidz' | 'absensi'>('bacaan');
+  const [isSearchingCloud, setIsSearchingCloud] = useState(false);
+  const [cloudPublicReport, setCloudPublicReport] = useState<PublicStudentReport | null>(null);
+  const [searchMatches, setSearchMatches] = useState<PublicStudentReport[]>([]);
 
-  const handleSearch = (customQuery?: string) => {
+  const handleSelectMatchedReport = (report: PublicStudentReport) => {
+    setCloudPublicReport(report);
+    setSearchMatches([]);
+    onSelectStudent(report.student);
+    onNotify('success', 'Data Siswa Ditemukan', `Menampilkan laporan untuk ${report.student.nama}`);
+  };
+
+  const handleSearch = async (customQuery?: string) => {
     const raw = (customQuery ?? query).trim();
     const q = raw.toLowerCase();
     if (!q) {
-      onNotify('info', 'Masukkan NISN Siswa', 'Silakan ketik 10 digit nomor NISN putra-putri Anda.');
+      onNotify('info', 'Masukkan NISN atau Nama Siswa', 'Silakan ketik nomor NISN atau nama lengkap putra-putri Anda.');
       return;
     }
 
-    const foundLocal = students.find(
-      s => s.nisn.toLowerCase() === q || s.nama.toLowerCase().includes(q)
-    );
+    setSearchMatches([]);
 
-    if (foundLocal) {
-      onSelectStudent(foundLocal);
-      onNotify('success', 'Data Siswa Ditemukan', `Menampilkan laporan untuk ${foundLocal.nama}`);
+    // 1. When centralized Supabase DB is active, query live cloud database directly by NISN or Nama
+    if (cloudDb.isSupabaseMode()) {
+      setIsSearchingCloud(true);
+      try {
+        const results = await cloudDb.searchPublicStudents(raw);
+        const exactNisn = results.find(r => r.student.nisn.toLowerCase() === q);
+        if (exactNisn) {
+          handleSelectMatchedReport(exactNisn);
+          return;
+        }
+        if (results.length === 1) {
+          handleSelectMatchedReport(results[0]);
+          return;
+        }
+        if (results.length > 1) {
+          setSearchMatches(results);
+          onNotify(
+            'info',
+            `Ditemukan ${results.length} Siswa`,
+            'Silakan pilih nama putra-putri Anda dari daftar hasil di bawah.'
+          );
+          return;
+        }
+      } catch {
+        // Fallback to synced local cache below if network briefly offline
+      } finally {
+        setIsSearchingCloud(false);
+      }
+    }
+
+    // 2. Check synced in-memory / local cache (exact NISN first, then name match)
+    const exactLocal = students.find(s => s.nisn.toLowerCase() === q);
+    if (exactLocal) {
+      setCloudPublicReport(null);
+      onSelectStudent(exactLocal);
+      onNotify('success', 'Data Siswa Ditemukan', `Menampilkan laporan untuk ${exactLocal.nama}`);
       return;
+    }
+
+    const nameMatchesLocal = students.filter(s => s.nama.toLowerCase().includes(q));
+    if (nameMatchesLocal.length === 1) {
+      setCloudPublicReport(null);
+      onSelectStudent(nameMatchesLocal[0]);
+      onNotify('success', 'Data Siswa Ditemukan', `Menampilkan laporan untuk ${nameMatchesLocal[0].nama}`);
+      return;
+    }
+    if (nameMatchesLocal.length > 1) {
+      const wrapped: PublicStudentReport[] = nameMatchesLocal.slice(0, 10).map(st => ({
+        student: st,
+        recentBacaan: bacaanList.filter(b => b.nisn === st.nisn),
+        recentTahfidz: tahfidzList.filter(t => t.nisn === st.nisn)
+      }));
+      setSearchMatches(wrapped);
+      onNotify(
+        'info',
+        `Ditemukan ${nameMatchesLocal.length} Siswa`,
+        'Silakan pilih nama putra-putri Anda dari daftar hasil di bawah.'
+      );
+      return;
+    }
+
+    // 3. Fallback Cloud lookup by NISN (for Firestore publicReports on fresh browsers)
+    if (/^[a-zA-Z0-9_-]{4,40}$/.test(raw)) {
+      setIsSearchingCloud(true);
+      try {
+        const cloudReport = await cloudDb.getPublicReportByNisn(raw);
+        if (cloudReport) {
+          handleSelectMatchedReport(cloudReport);
+          return;
+        }
+      } finally {
+        setIsSearchingCloud(false);
+      }
     }
 
     onNotify(
       'error',
       'Data Tidak Ditemukan',
-      students.length === 0
-        ? 'Belum ada data siswa tersimpan di browser ini. Silakan Login Petugas untuk menambahkan atau mengimpor data siswa.'
-        : `Siswa dengan kata kunci "${raw}" tidak ditemukan di database browser ini.`
+      `Siswa dengan kata kunci "${raw}" tidak ditemukan. Pastikan NISN atau ejaan nama sudah sesuai.`
     );
   };
 
-  const studentBacaan = selectedStudent
+  const isUsingCloudReport =
+    Boolean(cloudPublicReport && selectedStudent && cloudPublicReport.student.nisn === selectedStudent.nisn);
+
+  const localBacaan = selectedStudent
     ? bacaanList.filter(b => b.nisn === selectedStudent.nisn)
     : [];
+  const studentBacaan =
+    isUsingCloudReport && cloudPublicReport!.recentBacaan.length > 0
+      ? cloudPublicReport!.recentBacaan
+      : localBacaan;
 
-  const studentTahfidz = selectedStudent
+  const localTahfidz = selectedStudent
     ? tahfidzList.filter(t => t.nisn === selectedStudent.nisn)
     : [];
+  const studentTahfidz =
+    isUsingCloudReport && cloudPublicReport!.recentTahfidz.length > 0
+      ? cloudPublicReport!.recentTahfidz
+      : localTahfidz;
 
   const studentAbsensi = selectedStudent
     ? absensiList.filter(a => a.nisn === selectedStudent.nisn)
     : [];
 
-  const hadirCount = studentAbsensi.filter(a => a.status === 'Hadir').length;
-  const totalSesi = studentAbsensi.length;
-  const presensiPersen = totalSesi > 0
-    ? Math.round((hadirCount / totalSesi) * 100)
-    : selectedStudent?.kehadiranPersen ?? 100;
+  const cloudAbs = isUsingCloudReport ? cloudPublicReport?.absensiSummary : undefined;
+  const hadirCount =
+    cloudAbs && isUsingCloudReport
+      ? cloudAbs.hadir
+      : studentAbsensi.filter(a => a.status === 'Hadir').length;
+  const sakitCount =
+    cloudAbs && isUsingCloudReport
+      ? cloudAbs.sakit
+      : studentAbsensi.filter(a => a.status === 'Sakit').length;
+  const izinCount =
+    cloudAbs && isUsingCloudReport
+      ? cloudAbs.izin
+      : studentAbsensi.filter(a => a.status === 'Izin').length;
+  const alpaCount =
+    cloudAbs && isUsingCloudReport
+      ? cloudAbs.alpa
+      : studentAbsensi.filter(a => a.status === 'Alpa').length;
+  const totalSesi =
+    cloudAbs && isUsingCloudReport
+      ? cloudAbs.hadir + cloudAbs.sakit + cloudAbs.izin + cloudAbs.alpa
+      : studentAbsensi.length;
+  const presensiPersen =
+    totalSesi > 0
+      ? Math.round((hadirCount / totalSesi) * 100)
+      : cloudAbs?.persen ?? selectedStudent?.kehadiranPersen ?? 100;
 
   return (
     <div className="space-y-6">
@@ -89,7 +202,7 @@ export const PublicPortal: React.FC<PublicPortalProps> = ({
             Pantau Mutaba'ah Tilawati & Tahfidz Ananda
           </h1>
           <p className="text-emerald-100 text-xs sm:text-sm max-w-xl mx-auto leading-relaxed">
-            Periksa pencapaian mengaji harian, setoran hafalan Qur'an, kehadiran halaqah, dan hasil tes kenaikan tingkat cukup dengan nomor NISN anak.
+            Periksa pencapaian mengaji harian, setoran hafalan Qur'an, kehadiran halaqah, dan hasil tes kenaikan tingkat secara online dengan nomor NISN atau nama siswa.
           </p>
 
           {/* Search Box */}
@@ -100,7 +213,7 @@ export const PublicPortal: React.FC<PublicPortalProps> = ({
                 value={query}
                 onChange={e => setQuery(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && handleSearch()}
-                placeholder="Ketik 10 digit NISN siswa..."
+                placeholder="Ketik NISN atau nama lengkap siswa..."
                 className="w-full pl-4 pr-10 py-3 rounded-l-2xl text-slate-800 font-semibold focus:outline-none focus:ring-2 focus:ring-amber-400 text-xs sm:text-sm bg-white"
               />
               {query && (
@@ -114,12 +227,42 @@ export const PublicPortal: React.FC<PublicPortalProps> = ({
             </div>
             <button
               onClick={() => handleSearch()}
-              className="bg-amber-400 hover:bg-amber-500 text-slate-900 font-bold px-6 rounded-r-2xl text-xs sm:text-sm transition-colors flex items-center gap-1.5 shadow-sm"
+              disabled={isSearchingCloud}
+              className="bg-amber-400 hover:bg-amber-500 disabled:bg-amber-300 text-slate-900 font-bold px-6 rounded-r-2xl text-xs sm:text-sm transition-colors flex items-center gap-1.5 shadow-sm"
             >
               <Search className="w-4 h-4" />
-              <span>Cari</span>
+              <span>{isSearchingCloud ? 'Mencari...' : 'Cari'}</span>
             </button>
           </div>
+
+          {/* Multi-match picker when searching by Name */}
+          {searchMatches.length > 1 && (
+            <div className="max-w-lg mx-auto bg-white/95 text-slate-800 rounded-2xl p-3 shadow-lg text-left space-y-1.5">
+              <p className="text-[11px] font-bold text-emerald-900 px-1">
+                Pilih siswa yang sesuai ({searchMatches.length} hasil):
+              </p>
+              <div className="max-h-56 overflow-y-auto divide-y divide-slate-100">
+                {searchMatches.map(item => (
+                  <button
+                    key={item.student.nisn}
+                    type="button"
+                    onClick={() => handleSelectMatchedReport(item)}
+                    className="w-full text-left px-3 py-2 hover:bg-emerald-50 rounded-xl transition-colors flex items-center justify-between gap-2"
+                  >
+                    <div>
+                      <p className="text-xs font-extrabold text-slate-900">{item.student.nama}</p>
+                      <p className="text-[11px] text-slate-500">
+                        Kelas {item.student.kelas} · {item.student.kelasBTQ}
+                      </p>
+                    </div>
+                    <span className="text-[11px] font-mono font-bold text-emerald-800 shrink-0">
+                      {item.student.nisn}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Dynamic Student Database Status */}
           <div className="pt-2 text-xs text-emerald-200 flex flex-wrap items-center justify-center gap-2">
@@ -128,8 +271,13 @@ export const PublicPortal: React.FC<PublicPortalProps> = ({
                 Tersedia <strong className="text-amber-300">{students.length}</strong> data siswa aktif — masukkan NISN atau nama lengkap putra-putri Anda.
               </span>
             ) : (
-              <span className="text-emerald-100/90">
-                Data siswa belum diisi pada browser ini — silakan klik <strong>Login Petugas</strong> untuk mengimpor atau menambahkan data siswa.
+              <span className="text-emerald-100/90 inline-flex items-center gap-1.5 flex-wrap justify-center">
+                <Cloud className="w-3.5 h-3.5 text-amber-300 shrink-0" />
+                <span>
+                  {cloudDb.isSupabaseMode()
+                    ? 'Terhubung ke Cloud Database — masukkan NISN atau nama lengkap siswa untuk melihat mutaba\'ah terkini.'
+                    : 'Ketik tepat 10 digit NISN untuk mengambil laporan Cloud siswa, atau klik Login Petugas / Cloud untuk sinkronisasi penuh.'}
+                </span>
               </span>
             )}
           </div>
@@ -410,19 +558,19 @@ export const PublicPortal: React.FC<PublicPortalProps> = ({
                   <div>
                     <span className="text-slate-500">Sakit:</span>{' '}
                     <strong className="text-blue-700 font-mono">
-                      {studentAbsensi.filter(a => a.status === 'Sakit').length} Sesi
+                      {sakitCount} Sesi
                     </strong>
                   </div>
                   <div>
                     <span className="text-slate-500">Izin:</span>{' '}
                     <strong className="text-amber-700 font-mono">
-                      {studentAbsensi.filter(a => a.status === 'Izin').length} Sesi
+                      {izinCount} Sesi
                     </strong>
                   </div>
                   <div>
                     <span className="text-slate-500">Alpa:</span>{' '}
                     <strong className="text-rose-700 font-mono">
-                      {studentAbsensi.filter(a => a.status === 'Alpa').length} Sesi
+                      {alpaCount} Sesi
                     </strong>
                   </div>
                 </div>

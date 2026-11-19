@@ -1,11 +1,13 @@
 import React from 'react';
 import { UserSession } from '../types';
-import { LogIn, LogOut, KeyRound } from 'lucide-react';
+import { LogIn, LogOut, KeyRound, Cloud, CloudOff } from 'lucide-react';
 
 interface NavbarProps {
   currentView: 'public' | 'dashboard';
   onNavigate: (view: 'public' | 'dashboard') => void;
   user: UserSession | null;
+  cloudConnected?: boolean;
+  onConnectCloud?: () => void;
   onOpenLogin: () => void;
   onOpenChangePassword: () => void;
   onLogout: () => void;
@@ -15,13 +17,15 @@ export const Navbar: React.FC<NavbarProps> = ({
   currentView,
   onNavigate,
   user,
+  cloudConnected = false,
+  onConnectCloud,
   onOpenLogin,
   onOpenChangePassword,
   onLogout
 }) => {
   return (
     <header className="bg-emerald-800 text-white shadow-md sticky top-0 z-40 no-print border-b border-emerald-900/40">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-8">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-4 sm:gap-8">
         
         {/* Zone 1: Single element Brand Wordmark */}
         <button
@@ -77,24 +81,47 @@ export const Navbar: React.FC<NavbarProps> = ({
           </span>
         </nav>
 
-        {/* Zone 3: 1 Primary Action */}
-        <div className="flex items-center gap-2.5 shrink-0">
+        {/* Zone 3: Primary Action & Cloud Status */}
+        <div className="flex items-center gap-2 shrink-0">
           {!user ? (
             <button
               onClick={onOpenLogin}
               className="px-3.5 py-2 text-xs font-bold text-slate-900 bg-amber-400 rounded-lg hover:bg-amber-300 transition-colors whitespace-nowrap shrink-0 shadow-sm flex items-center gap-1.5"
             >
               <LogIn className="w-3.5 h-3.5" />
-              <span>Login Petugas</span>
+              <span>Login Petugas / Cloud</span>
             </button>
           ) : (
             <div className="flex items-center gap-2">
+              {cloudConnected ? (
+                <span
+                  className="hidden sm:inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-900/75 border border-emerald-600/60 text-[11px] font-bold text-emerald-200"
+                  title={`Sinkron Cloud Aktif (${user.email || user.username})`}
+                >
+                  <Cloud className="w-3.5 h-3.5 text-emerald-300" />
+                  <span>Cloud Sinkron</span>
+                </span>
+              ) : (
+                onConnectCloud && (
+                  <button
+                    onClick={onConnectCloud}
+                    className="px-2.5 py-1.5 text-[11px] font-bold text-slate-950 bg-amber-400 hover:bg-amber-300 rounded-lg transition-colors whitespace-nowrap shrink-0 flex items-center gap-1 shadow-2xs"
+                    title="Hubungkan Akun Google agar data tersinkron real-time ke Cloud antar perangkat & akun"
+                  >
+                    <CloudOff className="w-3.5 h-3.5" />
+                    <span>Hubungkan Cloud</span>
+                  </button>
+                )
+              )}
+
               <div className="text-right hidden sm:block mr-1">
-                <p className="text-xs font-bold text-white truncate max-w-[180px] leading-tight">
+                <p className="text-xs font-bold text-white truncate max-w-[160px] leading-tight">
                   {user.nama}
                 </p>
-                <p className="text-[10px] text-amber-300 font-medium tracking-wide truncate max-w-[240px]">
-                  <span className="font-mono lowercase">@{user.username}</span>
+                <p className="text-[10px] text-amber-300 font-medium tracking-wide truncate max-w-[220px]">
+                  <span className="font-mono lowercase">
+                    {user.authProvider === 'google' ? user.email || user.username : `@${user.username}`}
+                  </span>
                   {' · '}
                   <span className="uppercase">
                     {user.role.replace(/_/g, ' ')}
@@ -103,14 +130,16 @@ export const Navbar: React.FC<NavbarProps> = ({
                 </p>
               </div>
 
-              <button
-                onClick={onOpenChangePassword}
-                className="px-2.5 py-1.5 text-xs font-semibold text-emerald-100 bg-emerald-900/70 hover:bg-emerald-900 border border-emerald-700/60 rounded-lg transition-colors whitespace-nowrap shrink-0 flex items-center gap-1"
-                title="Ubah Password Akun"
-              >
-                <KeyRound className="w-3.5 h-3.5 text-amber-300" />
-                <span className="hidden lg:inline">Password</span>
-              </button>
+              {user.authProvider !== 'google' && (
+                <button
+                  onClick={onOpenChangePassword}
+                  className="px-2.5 py-1.5 text-xs font-semibold text-emerald-100 bg-emerald-900/70 hover:bg-emerald-900 border border-emerald-700/60 rounded-lg transition-colors whitespace-nowrap shrink-0 flex items-center gap-1"
+                  title="Ubah Password Akun"
+                >
+                  <KeyRound className="w-3.5 h-3.5 text-amber-300" />
+                  <span className="hidden lg:inline">Password</span>
+                </button>
+              )}
 
               <button
                 onClick={onLogout}

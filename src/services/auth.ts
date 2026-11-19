@@ -1,5 +1,7 @@
 import { Role, Teacher, UserAccount, UserSession, AuthLogEntry } from '../types';
 import { HOMEROOM_CLASSES } from '../data/initialData';
+import { isSupabaseConfigured } from './supabase';
+import { supabaseDb } from './supabaseDb';
 
 const KEY_ACCOUNTS = 'spemda_auth_accounts_v1';
 const KEY_AUTH_LOGS = 'spemda_auth_logs_v1';
@@ -258,6 +260,11 @@ export const authService = {
     } catch {
       // ignore
     }
+    if (isSupabaseConfigured) {
+      void supabaseDb.appendAuthLog(newEntry).catch(() => {
+        // non-blocking log sync
+      });
+    }
   },
 
   /**
@@ -419,6 +426,13 @@ export const authService = {
 
     if (changed || existing.length === 0) {
       this.saveAccounts(filtered);
+      if (isSupabaseConfigured) {
+        try {
+          await supabaseDb.syncStaffAccountsBatch(filtered);
+        } catch {
+          // non-blocking sync
+        }
+      }
     }
     return filtered;
   },
@@ -440,6 +454,20 @@ export const authService = {
         ok: false,
         error: 'Username dan password wajib diisi.'
       };
+    }
+
+    if (isSupabaseConfigured) {
+      try {
+        const cloudAccounts = await supabaseDb.fetchStaffAccounts();
+        if (cloudAccounts.length > 0) {
+          this.saveAccounts(cloudAccounts);
+        } else {
+          // Bootstrap default Admin & Wali Kelas accounts on fresh empty Supabase database
+          await this.syncAccounts([]);
+        }
+      } catch {
+        // Fallback to cached accounts if transient network issue
+      }
     }
 
     const accounts = this.getAccounts();
@@ -554,6 +582,11 @@ export const authService = {
       updatedAt: nowIso
     };
     this.saveAccounts(accounts);
+    if (isSupabaseConfigured) {
+      void supabaseDb.upsertStaffAccount(accounts[idx]).catch(() => {
+        // non-blocking
+      });
+    }
 
     this.appendLog({
       username: account.username,
@@ -636,6 +669,11 @@ export const authService = {
       a => a.role === 'admin' || a.role === 'wali_kelas'
     );
     this.saveAccounts(accounts);
+    if (isSupabaseConfigured) {
+      void supabaseDb.purgeTeacherStaffAccounts().catch(() => {
+        // non-blocking
+      });
+    }
     try {
       localStorage.removeItem(KEY_AUTH_LOGS);
       const rawSession = sessionStorage.getItem(KEY_SESSION);
@@ -704,6 +742,13 @@ export const authService = {
       updatedAt: nowIso
     };
     this.saveAccounts(accounts);
+    if (isSupabaseConfigured) {
+      try {
+        await supabaseDb.upsertStaffAccount(accounts[idx]);
+      } catch {
+        // ignore
+      }
+    }
 
     // Update sessionStorage if active
     const saved = this.getSavedSession();
@@ -765,6 +810,13 @@ export const authService = {
       updatedAt: new Date().toISOString()
     };
     this.saveAccounts(accounts);
+    if (isSupabaseConfigured) {
+      try {
+        await supabaseDb.upsertStaffAccount(accounts[idx]);
+      } catch {
+        // ignore
+      }
+    }
 
     this.appendLog({
       username: accounts[idx].username,
@@ -843,6 +895,13 @@ export const authService = {
         updatedAt: nowIso
       };
       this.saveAccounts(accounts);
+      if (isSupabaseConfigured) {
+        try {
+          await supabaseDb.upsertStaffAccount(accounts[existingIdx]);
+        } catch {
+          // ignore
+        }
+      }
       return { ok: true, username: desiredUsername };
     } else {
       const rawPassword =
@@ -873,7 +932,15 @@ export const authService = {
         createdAt: nowIso,
         updatedAt: nowIso
       });
+      const createdAcc = accounts[accounts.length - 1];
       this.saveAccounts(accounts);
+      if (isSupabaseConfigured && createdAcc) {
+        try {
+          await supabaseDb.upsertStaffAccount(createdAcc);
+        } catch {
+          // ignore
+        }
+      }
       this.appendLog({
         username: desiredUsername,
         nama: params.teacher.nama.toUpperCase(),
@@ -933,6 +1000,13 @@ export const authService = {
 
     accounts.unshift(newAccount);
     this.saveAccounts(accounts);
+    if (isSupabaseConfigured) {
+      try {
+        await supabaseDb.upsertStaffAccount(newAccount);
+      } catch {
+        // ignore
+      }
+    }
 
     this.appendLog({
       username: newAccount.username,
@@ -987,6 +1061,11 @@ export const authService = {
     };
 
     this.saveAccounts(accounts);
+    if (isSupabaseConfigured) {
+      void supabaseDb.upsertStaffAccount(accounts[idx]).catch(() => {
+        // non-blocking
+      });
+    }
     return { ok: true };
   },
 
@@ -1004,6 +1083,11 @@ export const authService = {
       }
     }
     this.saveAccounts(accounts.filter(a => a.id !== accountId));
+    if (isSupabaseConfigured) {
+      void supabaseDb.deleteStaffAccount(accountId).catch(() => {
+        // non-blocking
+      });
+    }
     return { ok: true };
   }
 };

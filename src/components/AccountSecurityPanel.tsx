@@ -3,9 +3,12 @@ import {
   Role,
   UserAccount,
   UserSession,
-  AuthLogEntry
+  AuthLogEntry,
+  AccessRequest,
+  StaffInvite
 } from '../types';
 import { authService, generateStrongPassword, evaluatePasswordStrength } from '../services/auth';
+import { isSupabaseConfigured } from '../services/supabase';
 import { HOMEROOM_CLASSES } from '../data/initialData';
 import {
   Shield,
@@ -25,13 +28,40 @@ import {
   Trash2,
   X,
   Edit3,
-  Link2
+  Link2,
+  Cloud,
+  Mail,
+  UserCheck,
+  UploadCloud
 } from 'lucide-react';
 
 interface AccountSecurityPanelProps {
   currentUser: UserSession;
   accounts: UserAccount[];
   logs: AuthLogEntry[];
+  cloudConnected?: boolean;
+  accessRequests?: AccessRequest[];
+  staffInvites?: StaffInvite[];
+  onApproveAccessRequest?: (params: {
+    request: AccessRequest;
+    role: Role;
+    nama: string;
+    assignedGroup?: string;
+    assignedTahfidzGroup?: string;
+    assignedClass?: string;
+  }) => Promise<void>;
+  onRejectAccessRequest?: (uid: string) => Promise<void>;
+  onSaveCloudInvite?: (params: {
+    email: string;
+    nama: string;
+    role: Role;
+    assignedGroup?: string;
+    assignedTahfidzGroup?: string;
+    assignedClass?: string;
+  }) => Promise<void>;
+  onDeleteCloudInvite?: (inviteId: string) => Promise<void>;
+  onResyncCloudAccess?: () => Promise<void>;
+  onPushLocalToCloud?: () => Promise<void>;
   onRefreshAccounts: () => void;
   onNotify: (type: 'success' | 'error' | 'info', title: string, desc?: string) => void;
 }
@@ -40,12 +70,44 @@ export const AccountSecurityPanel: React.FC<AccountSecurityPanelProps> = ({
   currentUser,
   accounts,
   logs,
+  cloudConnected = false,
+  accessRequests = [],
+  staffInvites = [],
+  onApproveAccessRequest,
+  onRejectAccessRequest,
+  onSaveCloudInvite,
+  onDeleteCloudInvite,
+  onResyncCloudAccess,
+  onPushLocalToCloud,
   onRefreshAccounts,
   onNotify
 }) => {
   const [roleFilter, setRoleFilter] = useState<'all' | Role>('all');
   const [searchTerm, setSearchTerm] = useState('');
   const [subView, setSubView] = useState<'accounts' | 'logs'>('accounts');
+
+  // Cloud Invite & Request states
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [inviteNama, setInviteNama] = useState('');
+  const [inviteRole, setInviteRole] = useState<Role>('guru_ngaji');
+  const [inviteGroup, setInviteGroup] = useState('');
+  const [inviteTahfidzGroup, setInviteTahfidzGroup] = useState('HALAQAH TAHFIDZ');
+  const [inviteClass, setInviteClass] = useState(HOMEROOM_CLASSES[0]);
+  const [isCloudBusy, setIsCloudBusy] = useState(false);
+
+  // Per-request editable overrides
+  const [reqEdits, setReqEdits] = useState<
+    Record<
+      string,
+      {
+        role: Role;
+        nama: string;
+        assignedGroup: string;
+        assignedTahfidzGroup: string;
+        assignedClass: string;
+      }
+    >
+  >({});
 
   // Reset Password Modal state
   const [resetTarget, setResetTarget] = useState<UserAccount | null>(null);
@@ -254,31 +316,482 @@ export const AccountSecurityPanel: React.FC<AccountSecurityPanelProps> = ({
     }
   };
 
+  const pendingRequests = useMemo(
+    () => accessRequests.filter(r => r.status === 'pending'),
+    [accessRequests]
+  );
+
+  const getReqDraft = (req: AccessRequest) => {
+    if (reqEdits[req.uid]) return reqEdits[req.uid];
+    return {
+      role: req.requestedRole || 'guru_ngaji',
+      nama: req.nama || req.email.split('@')[0],
+      assignedGroup: req.requestedRole === 'guru_ngaji' ? req.requestedNote || '' : '',
+      assignedTahfidzGroup:
+        req.requestedRole === 'guru_tahfidz' ? req.requestedNote || 'HALAQAH TAHFIDZ' : 'HALAQAH TAHFIDZ',
+      assignedClass:
+        req.requestedRole === 'wali_kelas' && HOMEROOM_CLASSES.includes(req.requestedNote.toUpperCase())
+          ? req.requestedNote.toUpperCase()
+          : HOMEROOM_CLASSES[0]
+    };
+  };
+
+  const setReqDraftField = (
+    req: AccessRequest,
+    patch: Partial<{
+      role: Role;
+      nama: string;
+      assignedGroup: string;
+      assignedTahfidzGroup: string;
+      assignedClass: string;
+    }>
+  ) => {
+    const current = getReqDraft(req);
+    setReqEdits(prev => ({
+      ...prev,
+      [req.uid]: { ...current, ...patch }
+    }));
+  };
+
+  const handleCreateInvite = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!onSaveCloudInvite || !inviteEmail.trim() || !inviteNama.trim()) return;
+    setIsCloudBusy(true);
+    try {
+      await onSaveCloudInvite({
+        email: inviteEmail.trim().toLowerCase(),
+        nama: inviteNama.trim().toUpperCase(),
+        role: inviteRole,
+        assignedGroup: inviteRole === 'guru_ngaji' ? inviteGroup.trim().toUpperCase() : undefined,
+        assignedTahfidzGroup:
+          inviteRole === 'guru_tahfidz'
+            ? inviteTahfidzGroup.trim().toUpperCase() || 'HALAQAH TAHFIDZ'
+            : undefined,
+        assignedClass: inviteRole === 'wali_kelas' ? inviteClass : undefined
+      });
+      setInviteEmail('');
+      setInviteNama('');
+      setInviteGroup('');
+    } finally {
+      setIsCloudBusy(false);
+    }
+  };
+
+  const handleApproveReq = async (req: AccessRequest) => {
+    if (!onApproveAccessRequest) return;
+    const draft = getReqDraft(req);
+    setIsCloudBusy(true);
+    try {
+      await onApproveAccessRequest({
+        request: req,
+        role: draft.role,
+        nama: draft.nama.trim().toUpperCase() || req.nama,
+        assignedGroup: draft.role === 'guru_ngaji' ? draft.assignedGroup.trim().toUpperCase() : undefined,
+        assignedTahfidzGroup:
+          draft.role === 'guru_tahfidz'
+            ? draft.assignedTahfidzGroup.trim().toUpperCase() || 'HALAQAH TAHFIDZ'
+            : undefined,
+        assignedClass: draft.role === 'wali_kelas' ? draft.assignedClass : undefined
+      });
+    } finally {
+      setIsCloudBusy(false);
+    }
+  };
+
+  const handleRejectReq = async (uid: string) => {
+    if (!onRejectAccessRequest) return;
+    setIsCloudBusy(true);
+    try {
+      await onRejectAccessRequest(uid);
+    } finally {
+      setIsCloudBusy(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
 
-      {/* Share Link & Local Storage Mode Info Card */}
+      {/* Share Link & Cloud Multi-Account Sync Card */}
       {currentUser.role === 'admin' && typeof window !== 'undefined' && (
-        <section className="bg-emerald-50/90 border border-emerald-200 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-2xs">
+        <section
+          className={`border rounded-2xl p-4 flex flex-col lg:flex-row lg:items-center justify-between gap-4 shadow-2xs ${
+            cloudConnected
+              ? 'bg-emerald-50/90 border-emerald-200'
+              : 'bg-amber-50/90 border-amber-200'
+          }`}
+        >
           <div className="space-y-1">
             <div className="flex items-center gap-2">
-              <Link2 className="w-4 h-4 text-emerald-700 shrink-0" />
-              <h3 className="text-xs sm:text-sm font-extrabold text-emerald-950">
-                Mode Local Storage Aktif (Akses Terbuka Untuk Pemilik Link)
+              {cloudConnected ? (
+                <Cloud className="w-4 h-4 text-emerald-700 shrink-0" />
+              ) : (
+                <Link2 className="w-4 h-4 text-amber-700 shrink-0" />
+              )}
+              <h3 className="text-xs sm:text-sm font-extrabold text-slate-950">
+                {isSupabaseConfigured
+                  ? 'Sinkronisasi Cloud Terpusat Aktif (Supabase PostgreSQL & Realtime)'
+                  : cloudConnected
+                  ? 'Sinkronisasi Cloud Real-Time Aktif (Multi-Akun Google & Perangkat)'
+                  : 'Mode Sesi Lokal — Hubungkan Akun Google Admin untuk Sinkron Cloud'}
               </h3>
             </div>
-            <p className="text-[11px] text-emerald-900 leading-relaxed">
-              Siapapun yang memiliki tautan portal ini dapat langsung login menggunakan username &amp; password lokal tanpa akun Google. Data tersimpan otomatis di <strong>localStorage</strong> masing-masing browser perangkat.
+            <p className="text-[11px] text-slate-700 leading-relaxed max-w-3xl">
+              {isSupabaseConfigured
+                ? 'Seluruh data santri, guru BTQ/Tahfidz, capaian Tilawati, setoran Tahfidz, presensi, nilai ujian, rapor, serta akun petugas tersinkronisasi terpusat di database Supabase dan langsung terlihat di semua akun & perangkat.'
+                : cloudConnected
+                ? 'Setiap perubahan data siswa, capaian bacaan, hafalan tahfidz, absensi, dan rapor otomatis tersinkron secara real-time untuk semua guru, wali kelas, dan admin lain yang membuka link ini dengan Akun Google terdaftar.'
+                : 'Anda sedang login memakai akun lokal. Agar link ini sinkron antar perangkat dan akun Google guru lain, login menggunakan Akun Google Admin Utama (btqtahfidzsmpm2@gmail.com).'}
             </p>
           </div>
-          <button
-            type="button"
-            onClick={() => copyText(window.location.origin, 'Link Portal SIM-Qur\'an')}
-            className="px-3.5 py-2 bg-emerald-800 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shrink-0 shadow-2xs"
-          >
-            <Copy className="w-3.5 h-3.5" />
-            <span>Salin Link Portal</span>
-          </button>
+
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            {cloudConnected && onPushLocalToCloud && (
+              <button
+                type="button"
+                disabled={isCloudBusy}
+                onClick={async () => {
+                  setIsCloudBusy(true);
+                  try {
+                    await onPushLocalToCloud();
+                  } finally {
+                    setIsCloudBusy(false);
+                  }
+                }}
+                className="px-3 py-2 bg-white hover:bg-emerald-100 text-emerald-900 border border-emerald-300 font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-2xs disabled:opacity-50"
+              >
+                <UploadCloud className="w-3.5 h-3.5" />
+                <span>Upload Lokal ke Cloud</span>
+              </button>
+            )}
+
+            {!isSupabaseConfigured && cloudConnected && onResyncCloudAccess && (
+              <button
+                type="button"
+                disabled={isCloudBusy}
+                onClick={async () => {
+                  setIsCloudBusy(true);
+                  try {
+                    await onResyncCloudAccess();
+                  } finally {
+                    setIsCloudBusy(false);
+                  }
+                }}
+                className="px-3 py-2 bg-white hover:bg-blue-50 text-blue-900 border border-blue-200 font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-2xs disabled:opacity-50"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${isCloudBusy ? 'animate-spin' : ''}`} />
+                <span>Sinkron Ulang Akses</span>
+              </button>
+            )}
+
+            <button
+              type="button"
+              onClick={() => copyText(window.location.origin, "Link Portal SIM-Qur'an")}
+              className="px-3.5 py-2 bg-emerald-800 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-2xs"
+            >
+              <Copy className="w-3.5 h-3.5" />
+              <span>Salin Link Portal</span>
+            </button>
+          </div>
+        </section>
+      )}
+
+      {/* Pending Google Access Requests Approval Queue (Cloud Admin) */}
+      {cloudConnected && currentUser.role === 'admin' && pendingRequests.length > 0 && (
+        <section className="bg-amber-50/70 border border-amber-300 rounded-2xl p-4 space-y-3 shadow-xs">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <UserCheck className="w-4 h-4 text-amber-700" />
+              <h3 className="text-xs sm:text-sm font-extrabold text-amber-950">
+                Permintaan Sinkron Akun Google Baru ({pendingRequests.length} Menunggu Persetujuan)
+              </h3>
+            </div>
+            <span className="text-[11px] text-amber-800 font-semibold">
+              Atur peran &amp; kelompok lalu klik Setujui
+            </span>
+          </div>
+
+          <div className="space-y-2.5">
+            {pendingRequests.map(req => {
+              const draft = getReqDraft(req);
+              return (
+                <div
+                  key={req.uid}
+                  className="bg-white border border-amber-200 rounded-xl p-3 flex flex-col lg:flex-row lg:items-center justify-between gap-3"
+                >
+                  <div className="min-w-0 space-y-0.5">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-bold text-xs text-slate-900">{req.nama}</span>
+                      <span className="text-[11px] font-mono text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                        {req.email}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-500">
+                      Permintaan: <strong>{getRoleLabel(req.requestedRole)}</strong>
+                      {req.requestedNote ? ` · Keterangan: "${req.requestedNote}"` : ''}
+                    </p>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2">
+                    <input
+                      type="text"
+                      value={draft.nama}
+                      onChange={e => setReqDraftField(req, { nama: e.target.value })}
+                      placeholder="Nama Lengkap"
+                      className="px-2.5 py-1.5 border border-slate-300 rounded-lg text-xs font-semibold w-40 bg-white"
+                    />
+
+                    <select
+                      value={draft.role}
+                      onChange={e => setReqDraftField(req, { role: e.target.value as Role })}
+                      className="px-2.5 py-1.5 border border-slate-300 rounded-lg text-xs font-bold bg-white"
+                    >
+                      <option value="guru_ngaji">Guru Ngaji (BTQ)</option>
+                      <option value="guru_tahfidz">Guru Tahfidz</option>
+                      <option value="wali_kelas">Wali Kelas</option>
+                      <option value="admin">Co-Admin</option>
+                    </select>
+
+                    {draft.role === 'guru_ngaji' && (
+                      <input
+                        type="text"
+                        value={draft.assignedGroup}
+                        onChange={e => setReqDraftField(req, { assignedGroup: e.target.value })}
+                        placeholder="Kelompok BTQ (mis. TILAWATI 4 PI)"
+                        className="px-2.5 py-1.5 border border-slate-300 rounded-lg text-xs uppercase w-48 bg-white"
+                      />
+                    )}
+
+                    {draft.role === 'guru_tahfidz' && (
+                      <input
+                        type="text"
+                        value={draft.assignedTahfidzGroup}
+                        onChange={e =>
+                          setReqDraftField(req, { assignedTahfidzGroup: e.target.value })
+                        }
+                        placeholder="Halaqah Tahfidz"
+                        className="px-2.5 py-1.5 border border-slate-300 rounded-lg text-xs uppercase w-48 bg-white"
+                      />
+                    )}
+
+                    {draft.role === 'wali_kelas' && (
+                      <select
+                        value={draft.assignedClass}
+                        onChange={e => setReqDraftField(req, { assignedClass: e.target.value })}
+                        className="px-2.5 py-1.5 border border-slate-300 rounded-lg text-xs font-bold bg-white"
+                      >
+                        {HOMEROOM_CLASSES.map(c => (
+                          <option key={c} value={c}>
+                            Kelas {c}
+                          </option>
+                        ))}
+                      </select>
+                    )}
+
+                    <button
+                      type="button"
+                      disabled={isCloudBusy}
+                      onClick={() => handleApproveReq(req)}
+                      className="px-3 py-1.5 bg-emerald-800 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold flex items-center gap-1 disabled:opacity-50"
+                    >
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                      <span>Setujui</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      disabled={isCloudBusy}
+                      onClick={() => handleRejectReq(req.uid)}
+                      className="px-2.5 py-1.5 bg-white hover:bg-rose-50 text-rose-700 border border-rose-200 rounded-lg text-xs font-bold disabled:opacity-50"
+                    >
+                      Tolak
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
+      {/* Pre-Authorized Google Emails & Invites (Firebase Cloud Admin) */}
+      {!isSupabaseConfigured && cloudConnected && currentUser.role === 'admin' && onSaveCloudInvite && (
+        <section className="bg-white border border-slate-200 rounded-2xl p-4 space-y-4 shadow-xs">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
+            <div>
+              <h3 className="text-xs sm:text-sm font-extrabold text-slate-900 flex items-center gap-2">
+                <Mail className="w-4 h-4 text-emerald-700" />
+                <span>Daftar Email Google Terotorisasi (Auto-Sinkron Saat Guru / Wali Kelas Login)</span>
+              </h3>
+              <p className="text-[11px] text-slate-500 mt-0.5">
+                Daftarkan email Gmail Guru BTQ, Guru Tahfidz, Wali Kelas, atau Co-Admin di sini agar mereka langsung tersinkron otomatis begitu membuka link &amp; masuk Google.
+              </p>
+            </div>
+            <span className="text-[11px] font-mono font-bold text-emerald-800 bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-200 shrink-0">
+              {staffInvites.length} Email Terdaftar
+            </span>
+          </div>
+
+          <form onSubmit={handleCreateInvite} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-2.5 items-end">
+            <div className="lg:col-span-2">
+              <label className="text-[11px] font-bold text-slate-600 block mb-1">
+                Email Google:
+              </label>
+              <input
+                type="email"
+                value={inviteEmail}
+                onChange={e => setInviteEmail(e.target.value)}
+                placeholder="mis. ustadzah.siti@gmail.com"
+                required
+                className="w-full p-2 border border-slate-300 rounded-xl text-xs bg-white focus:outline-none focus:ring-1 focus:ring-emerald-600"
+              />
+            </div>
+
+            <div>
+              <label className="text-[11px] font-bold text-slate-600 block mb-1">
+                Nama Guru / Petugas:
+              </label>
+              <input
+                type="text"
+                value={inviteNama}
+                onChange={e => setInviteNama(e.target.value)}
+                placeholder="USTADZAH SITI"
+                required
+                className="w-full p-2 border border-slate-300 rounded-xl text-xs font-bold uppercase bg-white focus:outline-none focus:ring-1 focus:ring-emerald-600"
+              />
+            </div>
+
+            <div>
+              <label className="text-[11px] font-bold text-slate-600 block mb-1">Peran:</label>
+              <select
+                value={inviteRole}
+                onChange={e => setInviteRole(e.target.value as Role)}
+                className="w-full p-2 border border-slate-300 rounded-xl text-xs font-semibold bg-white"
+              >
+                <option value="guru_ngaji">Guru Ngaji (BTQ)</option>
+                <option value="guru_tahfidz">Guru Tahfidz</option>
+                <option value="wali_kelas">Wali Kelas</option>
+                <option value="admin">Co-Admin</option>
+              </select>
+            </div>
+
+            <div>
+              {inviteRole === 'guru_ngaji' ? (
+                <>
+                  <label className="text-[11px] font-bold text-slate-600 block mb-1">
+                    Kelas BTQ Binaan:
+                  </label>
+                  <input
+                    type="text"
+                    value={inviteGroup}
+                    onChange={e => setInviteGroup(e.target.value)}
+                    placeholder="TILAWATI 4 PI"
+                    className="w-full p-2 border border-slate-300 rounded-xl text-xs uppercase bg-white"
+                  />
+                </>
+              ) : inviteRole === 'guru_tahfidz' ? (
+                <>
+                  <label className="text-[11px] font-bold text-slate-600 block mb-1">
+                    Halaqah Tahfidz:
+                  </label>
+                  <input
+                    type="text"
+                    value={inviteTahfidzGroup}
+                    onChange={e => setInviteTahfidzGroup(e.target.value)}
+                    placeholder="HALAQAH TAHFIDZ"
+                    className="w-full p-2 border border-slate-300 rounded-xl text-xs uppercase bg-white"
+                  />
+                </>
+              ) : inviteRole === 'wali_kelas' ? (
+                <>
+                  <label className="text-[11px] font-bold text-slate-600 block mb-1">
+                    Kelas Formal:
+                  </label>
+                  <select
+                    value={inviteClass}
+                    onChange={e => setInviteClass(e.target.value)}
+                    className="w-full p-2 border border-slate-300 rounded-xl text-xs font-bold bg-white"
+                  >
+                    {HOMEROOM_CLASSES.map(c => (
+                      <option key={c} value={c}>
+                        Kelas {c}
+                      </option>
+                    ))}
+                  </select>
+                </>
+              ) : (
+                <>
+                  <label className="text-[11px] font-bold text-slate-600 block mb-1">Lingkup:</label>
+                  <div className="p-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-600 font-semibold">
+                    Akses Penuh Admin
+                  </div>
+                </>
+              )}
+            </div>
+
+            <div>
+              <button
+                type="submit"
+                disabled={isCloudBusy}
+                className="w-full py-2 px-3 bg-emerald-800 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-colors shadow-2xs disabled:opacity-50"
+              >
+                + Daftarkan Email
+              </button>
+            </div>
+          </form>
+
+          {staffInvites.length > 0 && (
+            <div className="overflow-x-auto border border-slate-200 rounded-xl">
+              <table className="w-full text-xs text-left">
+                <thead className="bg-slate-50 text-slate-600 uppercase font-bold border-b border-slate-200">
+                  <tr>
+                    <th className="p-2.5">Email Google</th>
+                    <th className="p-2.5">Nama</th>
+                    <th className="p-2.5">Peran</th>
+                    <th className="p-2.5">Lingkup Akses</th>
+                    <th className="p-2.5 text-center">Hapus</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {staffInvites.map(inv => (
+                    <tr key={inv.id} className="hover:bg-slate-50/70">
+                      <td className="p-2.5 font-mono text-emerald-800 font-semibold">{inv.email}</td>
+                      <td className="p-2.5 font-bold text-slate-900">{inv.nama}</td>
+                      <td className="p-2.5 font-semibold text-slate-700">{getRoleLabel(inv.role)}</td>
+                      <td className="p-2.5 text-slate-600">
+                        {inv.role === 'guru_ngaji'
+                          ? inv.assignedGroup || '-'
+                          : inv.role === 'guru_tahfidz'
+                          ? inv.assignedTahfidzGroup || 'HALAQAH TAHFIDZ'
+                          : inv.role === 'wali_kelas'
+                          ? `Kelas ${inv.assignedClass || '-'}`
+                          : 'Administrator Penuh'}
+                      </td>
+                      <td className="p-2.5 text-center">
+                        {onDeleteCloudInvite && (
+                          <button
+                            type="button"
+                            disabled={isCloudBusy}
+                            onClick={async () => {
+                              setIsCloudBusy(true);
+                              try {
+                                await onDeleteCloudInvite(inv.id);
+                              } finally {
+                                setIsCloudBusy(false);
+                              }
+                            }}
+                            className="p-1 text-rose-600 hover:bg-rose-50 rounded-lg"
+                            title="Hapus undangan akses Google ini"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </section>
       )}
 

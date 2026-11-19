@@ -10,6 +10,7 @@ import {
   RaporSettings
 } from '../types';
 import { storage } from '../services/storage';
+import { cloudDb } from '../services/cloudDb';
 import { downloadRaporPdf, downloadClassSummaryPdf } from '../services/raporPdf';
 import { RaporPrintableSheet, ClassSummaryPrintableSheet } from './RaporPrintableSheet';
 import { detectBtqClassGender, isValidBtqClass } from '../utils/access';
@@ -292,6 +293,15 @@ export const ReportCenterPanel: React.FC<ReportCenterPanelProps> = ({
   const handleSaveSettings = (e: React.FormEvent) => {
     e.preventDefault();
     storage.saveRaporSettings(settings);
+    if (cloudDb.isCloudAuthenticated()) {
+      void cloudDb.saveRaporSettingsCloud(settings).catch(err => {
+        onNotify(
+          'error',
+          'Gagal Sinkronisasi Cloud',
+          err instanceof Error ? err.message : 'Pengaturan rapor belum tersinkron ke Cloud.'
+        );
+      });
+    }
     setShowSettingsEditor(false);
     onNotify('success', 'Pengaturan Rapor Disimpan', 'Kop surat dan tanda tangan rapor diperbarui.');
   };
@@ -302,11 +312,20 @@ export const ReportCenterPanel: React.FC<ReportCenterPanelProps> = ({
     kelasLabel: string;
     jenisCetak: RaporPrintBatchLog['jenisCetak'];
   }) => {
-    storage.recordRaporPrintBatch({
+    const res = storage.recordRaporPrintBatch({
       ...params,
       semester: settings.semester,
       tahunAjaran: settings.tahunAjaran
     });
+    if (cloudDb.isCloudAuthenticated()) {
+      void cloudDb.saveRaporPrintBatchCloud(res).catch(err => {
+        onNotify(
+          'error',
+          'Gagal Sinkronisasi Cloud',
+          err instanceof Error ? err.message : 'Status cetak rapor belum tersinkron ke Cloud.'
+        );
+      });
+    }
     refreshPrintState();
   };
 
@@ -1093,6 +1112,15 @@ export const ReportCenterPanel: React.FC<ReportCenterPanelProps> = ({
                     type="button"
                     onClick={() => {
                       storage.resetAllRaporStatuses();
+                      if (cloudDb.isCloudAuthenticated()) {
+                        void cloudDb.resetAllRaporStatusesCloud().catch(err => {
+                          onNotify(
+                            'error',
+                            'Gagal Sinkronisasi Cloud',
+                            err instanceof Error ? err.message : 'Reset status cetak belum tersinkron ke Cloud.'
+                          );
+                        });
+                      }
                       refreshPrintState();
                       onNotify('info', 'Status Cetak Direset', 'Semua status cetak rapor diatur ulang menjadi Belum Dicetak.');
                     }}
@@ -1356,6 +1384,15 @@ export const ReportCenterPanel: React.FC<ReportCenterPanelProps> = ({
                                     type="button"
                                     onClick={() => {
                                       storage.resetStudentRaporStatus(s.nisn);
+                                      if (cloudDb.isCloudAuthenticated()) {
+                                        void cloudDb.resetStudentRaporStatusCloud(s.nisn).catch(err => {
+                                          onNotify(
+                                            'error',
+                                            'Gagal Sinkronisasi Cloud',
+                                            err instanceof Error ? err.message : 'Reset status cetak siswa belum tersinkron ke Cloud.'
+                                          );
+                                        });
+                                      }
                                       refreshPrintState();
                                     }}
                                     className="p-1 text-slate-400 hover:text-rose-700 rounded"

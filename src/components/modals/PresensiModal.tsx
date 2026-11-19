@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Student, UserSession } from '../../types';
 import { storage } from '../../services/storage';
+import { cloudDb } from '../../services/cloudDb';
 import { detectBtqClassGender, isValidBtqClass } from '../../utils/access';
 import { computeStudentAttendanceSummary, getCurrentMonthStr } from '../../utils/attendance';
 import { X, ClipboardCheck, Check, AlertTriangle } from 'lucide-react';
@@ -119,7 +120,25 @@ export const PresensiModal: React.FC<PresensiModalProps> = ({
       status: attendanceMap[s.nisn] || ('Hadir' as const)
     }));
 
-    storage.saveAttendanceBatch(entries, sesi, tanggal);
+    const res = storage.saveAttendanceBatch(entries, sesi, tanggal);
+
+    if (cloudDb.isCloudAuthenticated()) {
+      void cloudDb
+        .saveAbsensiBatchCloud({
+          records: res.savedRecords,
+          updatedStudents: res.updatedStudents,
+          allBacaan: storage.getBacaan(),
+          allTahfidz: storage.getTahfidz(),
+          allAbsensi: storage.getAbsensi()
+        })
+        .catch(err => {
+          onNotify(
+            'error',
+            'Gagal Sinkronisasi Cloud',
+            err instanceof Error ? err.message : 'Data presensi belum tersinkron ke Cloud.'
+          );
+        });
+    }
 
     onNotify(
       'success',

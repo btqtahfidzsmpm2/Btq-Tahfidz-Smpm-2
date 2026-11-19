@@ -48,6 +48,14 @@ service cloud.firestore {
         arr[0].size() <= 150;
     }
 
+    function isOptionalAdminEmails(data, maxLen) {
+      return !('adminEmails' in data) || (
+        data.adminEmails is list &&
+        data.adminEmails.size() <= maxLen &&
+        (data.adminEmails.size() == 0 || (data.adminEmails[0] is string && data.adminEmails[0].size() <= 150))
+      );
+    }
+
     function isOptionalString(data, key, maxLen) {
       return !(key in data) || (data[key] is string && data[key].size() <= maxLen);
     }
@@ -55,16 +63,33 @@ service cloud.firestore {
     // 3. Entity Validation Blueprints
     function isValidAdminDoc(data) {
       return data.keys().hasAll(['uid', 'email', 'nama', 'createdAt']) &&
-        data.keys().hasOnly(['uid', 'email', 'nama', 'createdAt']) &&
+        data.keys().hasOnly(['uid', 'email', 'nama', 'inviteId', 'createdAt']) &&
         isValidId(data.uid) &&
         data.email is string && data.email.size() >= 3 && data.email.size() <= 150 &&
         data.nama is string && data.nama.size() >= 1 && data.nama.size() <= 120 &&
+        (!('inviteId' in data) || isValidId(data.inviteId)) &&
         data.createdAt is timestamp;
+    }
+
+    function isValidStaffInvite(data) {
+      return data.keys().hasAll(['id', 'email', 'nama', 'role', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'email', 'nama', 'role', 'teacherId', 'assignedGroup', 'assignedTahfidzGroup', 'assignedClass', 'adminEmails', 'createdAt', 'updatedAt']) &&
+        isValidId(data.id) &&
+        data.email is string && data.email.size() >= 3 && data.email.size() <= 150 &&
+        data.nama is string && data.nama.size() >= 1 && data.nama.size() <= 120 &&
+        data.role in ['admin', 'guru_ngaji', 'guru_tahfidz', 'wali_kelas'] &&
+        isOptionalString(data, 'teacherId', 128) &&
+        isOptionalString(data, 'assignedGroup', 200) &&
+        isOptionalString(data, 'assignedTahfidzGroup', 200) &&
+        isOptionalString(data, 'assignedClass', 30) &&
+        isOptionalAdminEmails(data, 20) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
     }
 
     function isValidStaffUser(data) {
       return data.keys().hasAll(['uid', 'email', 'nama', 'role', 'isActive', 'createdAt', 'updatedAt']) &&
-        data.keys().hasOnly(['uid', 'email', 'nama', 'role', 'teacherId', 'assignedGroup', 'assignedTahfidzGroup', 'assignedClass', 'isActive', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['uid', 'email', 'nama', 'role', 'teacherId', 'assignedGroup', 'assignedTahfidzGroup', 'assignedClass', 'inviteId', 'adminEmails', 'isActive', 'createdAt', 'updatedAt']) &&
         isValidId(data.uid) &&
         data.email is string && data.email.size() >= 3 && data.email.size() <= 150 &&
         data.nama is string && data.nama.size() >= 1 && data.nama.size() <= 120 &&
@@ -73,6 +98,8 @@ service cloud.firestore {
         isOptionalString(data, 'assignedGroup', 200) &&
         isOptionalString(data, 'assignedTahfidzGroup', 200) &&
         isOptionalString(data, 'assignedClass', 30) &&
+        (!('inviteId' in data) || isValidId(data.inviteId)) &&
+        isOptionalAdminEmails(data, 20) &&
         data.isActive is bool &&
         data.createdAt is timestamp &&
         data.updatedAt is timestamp;
@@ -80,7 +107,7 @@ service cloud.firestore {
 
     function isValidStaffDirectoryItem(data) {
       return data.keys().hasAll(['id', 'nama', 'role', 'kelompokBTQ', 'ruangan', 'createdAt', 'updatedAt']) &&
-        data.keys().hasOnly(['id', 'nama', 'role', 'kelompokBTQ', 'kelompokTahfidz', 'assignedClass', 'ruangan', 'kontak', 'email', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'nama', 'role', 'kelompokBTQ', 'kelompokTahfidz', 'assignedClass', 'ruangan', 'kontak', 'email', 'adminEmails', 'createdAt', 'updatedAt']) &&
         isValidId(data.id) &&
         data.nama is string && data.nama.size() >= 1 && data.nama.size() <= 120 &&
         data.role in ['admin', 'guru_ngaji', 'guru_tahfidz', 'wali_kelas'] &&
@@ -90,19 +117,21 @@ service cloud.firestore {
         data.ruangan is string && data.ruangan.size() <= 100 &&
         isOptionalString(data, 'kontak', 40) &&
         isOptionalString(data, 'email', 150) &&
+        isOptionalAdminEmails(data, 20) &&
         data.createdAt is timestamp &&
         data.updatedAt is timestamp;
     }
 
     function isValidAccessRequest(data) {
       return data.keys().hasAll(['uid', 'email', 'nama', 'requestedRole', 'requestedNote', 'status', 'createdAt', 'updatedAt']) &&
-        data.keys().hasOnly(['uid', 'email', 'nama', 'requestedRole', 'requestedNote', 'status', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['uid', 'email', 'nama', 'requestedRole', 'requestedNote', 'status', 'adminEmails', 'createdAt', 'updatedAt']) &&
         isValidId(data.uid) &&
         data.email is string && data.email.size() >= 3 && data.email.size() <= 150 &&
         data.nama is string && data.nama.size() >= 1 && data.nama.size() <= 120 &&
         data.requestedRole in ['admin', 'guru_ngaji', 'guru_tahfidz', 'wali_kelas'] &&
         data.requestedNote is string && data.requestedNote.size() <= 200 &&
         data.status in ['pending', 'approved', 'rejected'] &&
+        isOptionalAdminEmails(data, 20) &&
         data.createdAt is timestamp &&
         data.updatedAt is timestamp;
     }
@@ -162,8 +191,8 @@ service cloud.firestore {
         isValidCapaianMap(data.capaianTerakhir) &&
         isValidUjianMap(data.ujian) &&
         (!('kehadiranPersen' in data) || (data.kehadiranPersen is number && data.kehadiranPersen >= 0 && data.kehadiranPersen <= 100)) &&
-        isBoundedEmailList(data.authorizedEmails, 20) &&
-        isBoundedEmailList(data.editorEmails, 15) &&
+        isBoundedEmailList(data.authorizedEmails, 50) &&
+        isBoundedEmailList(data.editorEmails, 30) &&
         data.createdAt is timestamp &&
         data.updatedAt is timestamp;
     }
@@ -187,8 +216,8 @@ service cloud.firestore {
         isOptionalString(data, 'catatan', 300) &&
         data.pengajar is string && data.pengajar.size() <= 120 &&
         isValidId(data.authorUid) &&
-        isBoundedEmailList(data.authorizedEmails, 20) &&
-        isBoundedEmailList(data.editorEmails, 15) &&
+        isBoundedEmailList(data.authorizedEmails, 50) &&
+        isBoundedEmailList(data.editorEmails, 30) &&
         data.createdAt is timestamp &&
         data.updatedAt is timestamp;
     }
@@ -212,8 +241,8 @@ service cloud.firestore {
         data.guru is string && data.guru.size() <= 120 &&
         isOptionalString(data, 'catatan', 300) &&
         isValidId(data.authorUid) &&
-        isBoundedEmailList(data.authorizedEmails, 20) &&
-        isBoundedEmailList(data.editorEmails, 15) &&
+        isBoundedEmailList(data.authorizedEmails, 50) &&
+        isBoundedEmailList(data.editorEmails, 30) &&
         data.createdAt is timestamp &&
         data.updatedAt is timestamp;
     }
@@ -234,39 +263,41 @@ service cloud.firestore {
         data.status in ['Hadir', 'Sakit', 'Izin', 'Alpa'] &&
         isOptionalString(data, 'keterangan', 200) &&
         isValidId(data.authorUid) &&
-        isBoundedEmailList(data.authorizedEmails, 20) &&
-        isBoundedEmailList(data.editorEmails, 15) &&
+        isBoundedEmailList(data.authorizedEmails, 50) &&
+        isBoundedEmailList(data.editorEmails, 30) &&
         data.createdAt is timestamp &&
         data.updatedAt is timestamp;
     }
 
     function isValidRaporSettings(data) {
       return data.keys().hasAll(['tahunAjaran', 'semester', 'tanggalRapor', 'kepalaSekolah', 'nbmKepala', 'koordinator', 'updatedAt']) &&
-        data.keys().hasOnly(['tahunAjaran', 'semester', 'tanggalRapor', 'kepalaSekolah', 'nbmKepala', 'koordinator', 'updatedAt']) &&
+        data.keys().hasOnly(['tahunAjaran', 'semester', 'tanggalRapor', 'kepalaSekolah', 'nbmKepala', 'koordinator', 'adminEmails', 'updatedAt']) &&
         data.tahunAjaran is string && data.tahunAjaran.size() <= 40 &&
         data.semester is string && data.semester.size() <= 30 &&
         data.tanggalRapor is string && data.tanggalRapor.size() <= 60 &&
         data.kepalaSekolah is string && data.kepalaSekolah.size() <= 120 &&
         data.nbmKepala is string && data.nbmKepala.size() <= 60 &&
         data.koordinator is string && data.koordinator.size() <= 120 &&
+        isOptionalAdminEmails(data, 20) &&
         data.updatedAt is timestamp;
     }
 
     function isValidRaporStatus(data) {
       return data.keys().hasAll(['nisn', 'printCount', 'lastPrintedAt', 'lastPrintedBy', 'semester', 'tahunAjaran', 'updatedAt']) &&
-        data.keys().hasOnly(['nisn', 'printCount', 'lastPrintedAt', 'lastPrintedBy', 'semester', 'tahunAjaran', 'updatedAt']) &&
+        data.keys().hasOnly(['nisn', 'printCount', 'lastPrintedAt', 'lastPrintedBy', 'semester', 'tahunAjaran', 'adminEmails', 'updatedAt']) &&
         isValidId(data.nisn) && data.nisn.size() <= 40 &&
         data.printCount is number && data.printCount >= 0 &&
         data.lastPrintedAt is string && data.lastPrintedAt.size() <= 50 &&
         data.lastPrintedBy is string && data.lastPrintedBy.size() <= 120 &&
         data.semester is string && data.semester.size() <= 30 &&
         data.tahunAjaran is string && data.tahunAjaran.size() <= 40 &&
+        isOptionalAdminEmails(data, 20) &&
         data.updatedAt is timestamp;
     }
 
     function isValidRaporLog(data) {
       return data.keys().hasAll(['id', 'printedAt', 'printedBy', 'kelasLabel', 'jenisCetak', 'totalRapor', 'semester', 'tahunAjaran', 'nisnList', 'createdAt']) &&
-        data.keys().hasOnly(['id', 'printedAt', 'printedBy', 'kelasLabel', 'jenisCetak', 'totalRapor', 'semester', 'tahunAjaran', 'nisnList', 'createdAt']) &&
+        data.keys().hasOnly(['id', 'printedAt', 'printedBy', 'kelasLabel', 'jenisCetak', 'totalRapor', 'semester', 'tahunAjaran', 'nisnList', 'adminEmails', 'createdAt']) &&
         isValidId(data.id) &&
         data.printedAt is string && data.printedAt.size() <= 50 &&
         data.printedBy is string && data.printedBy.size() <= 120 &&
@@ -277,12 +308,28 @@ service cloud.firestore {
         data.tahunAjaran is string && data.tahunAjaran.size() <= 40 &&
         data.nisnList is list && data.nisnList.size() <= 500 &&
         (data.nisnList.size() == 0 || (data.nisnList[0] is string && data.nisnList[0].size() <= 40)) &&
+        isOptionalAdminEmails(data, 20) &&
         data.createdAt is timestamp;
+    }
+
+    function isValidAbsensiSummaryMap(m) {
+      return m is map &&
+        m.keys().hasAll(['hadir', 'sakit', 'izin', 'alpa', 'persen']) &&
+        m.keys().hasOnly(['hadir', 'sakit', 'izin', 'alpa', 'persen']) &&
+        m.hadir is number && m.hadir >= 0 &&
+        m.sakit is number && m.sakit >= 0 &&
+        m.izin is number && m.izin >= 0 &&
+        m.alpa is number && m.alpa >= 0 &&
+        m.persen is number && m.persen >= 0 && m.persen <= 100;
     }
 
     function isValidPublicReport(data) {
       return data.keys().hasAll(['nisn', 'nama', 'gender', 'kelas', 'kelasBTQ', 'pengajar', 'ruangan', 'waliKelas', 'isTahfidz', 'capaianTerakhir', 'ujian', 'updatedAt']) &&
-        data.keys().hasOnly(['nisn', 'nama', 'gender', 'kelas', 'kelasBTQ', 'pengajar', 'ruangan', 'waliKelas', 'isTahfidz', 'halaqahTahfidz', 'targetJuz', 'totalHafalan', 'hafalanTerakhir', 'capaianTerakhir', 'ujian', 'kehadiranPersen', 'updatedAt']) &&
+        data.keys().hasOnly([
+          'nisn', 'nama', 'gender', 'kelas', 'kelasBTQ', 'pengajar', 'ruangan', 'waliKelas', 'isTahfidz',
+          'pembimbingTahfidz', 'halaqahTahfidz', 'targetJuz', 'totalHafalan', 'hafalanTerakhir',
+          'capaianTerakhir', 'ujian', 'kehadiranPersen', 'recentBacaan', 'recentTahfidz', 'absensiSummary', 'updatedAt'
+        ]) &&
         isValidId(data.nisn) && data.nisn.size() <= 40 &&
         data.nama is string && data.nama.size() >= 1 && data.nama.size() <= 150 &&
         data.gender in ['L', 'P'] &&
@@ -292,6 +339,7 @@ service cloud.firestore {
         data.ruangan is string && data.ruangan.size() <= 100 &&
         data.waliKelas is string && data.waliKelas.size() <= 120 &&
         data.isTahfidz is bool &&
+        isOptionalString(data, 'pembimbingTahfidz', 120) &&
         isOptionalString(data, 'halaqahTahfidz', 120) &&
         isOptionalString(data, 'targetJuz', 80) &&
         isOptionalString(data, 'totalHafalan', 100) &&
@@ -299,6 +347,9 @@ service cloud.firestore {
         isValidCapaianMap(data.capaianTerakhir) &&
         isValidUjianMap(data.ujian) &&
         (!('kehadiranPersen' in data) || (data.kehadiranPersen is number && data.kehadiranPersen >= 0 && data.kehadiranPersen <= 100)) &&
+        (!('recentBacaan' in data) || (data.recentBacaan is list && data.recentBacaan.size() <= 15 && (data.recentBacaan.size() == 0 || data.recentBacaan[0] is map))) &&
+        (!('recentTahfidz' in data) || (data.recentTahfidz is list && data.recentTahfidz.size() <= 15 && (data.recentTahfidz.size() == 0 || data.recentTahfidz[0] is map))) &&
+        (!('absensiSummary' in data) || isValidAbsensiSummaryMap(data.absensiSummary)) &&
         data.updatedAt is timestamp;
     }
 
@@ -313,17 +364,61 @@ service cloud.firestore {
     // Admin UID registry
     match /admins/{uid} {
       allow get: if isVerifiedUser() && isValidId(uid) && (request.auth.uid == uid || isAdmin());
-      allow list: if isBootstrapAdmin();
-      allow create: if isBootstrapAdmin() && isValidId(uid) && isValidAdminDoc(incoming()) && incoming().uid == uid && incoming().createdAt == request.time;
+      allow list: if isVerifiedUser() && (isBootstrapAdmin() || existing().email == request.auth.token.email.lower());
+      allow create: if isVerifiedUser() &&
+        isValidId(uid) &&
+        isValidAdminDoc(incoming()) &&
+        incoming().uid == uid &&
+        incoming().createdAt == request.time && (
+          isAdmin() ||
+          (
+            request.auth.uid == uid &&
+            'inviteId' in incoming() &&
+            incoming().email == request.auth.token.email.lower() &&
+            exists(/databases/$(database)/documents/staffInvites/$(incoming().inviteId)) &&
+            get(/databases/$(database)/documents/staffInvites/$(incoming().inviteId)).data.email == request.auth.token.email.lower() &&
+            get(/databases/$(database)/documents/staffInvites/$(incoming().inviteId)).data.role == 'admin'
+          )
+        );
       allow update: if false;
       allow delete: if isBootstrapAdmin() && isValidId(uid);
+    }
+
+    // Pre-authorized email invites (enables instant sync when opened on another Google account)
+    match /staffInvites/{inviteId} {
+      allow get: if isVerifiedUser() && isValidId(inviteId) && (isAdmin() || existing().email == request.auth.token.email.lower());
+      allow list: if isVerifiedUser() && (isBootstrapAdmin() || existing().email == request.auth.token.email.lower() || (('adminEmails' in existing()) && request.auth.token.email.lower() in existing().adminEmails));
+      allow create: if isAdmin() && isValidId(inviteId) && isValidStaffInvite(incoming()) && incoming().id == inviteId && incoming().createdAt == request.time && incoming().updatedAt == request.time;
+      allow update: if isAdmin() && isValidId(inviteId) && isValidStaffInvite(incoming()) && incoming().id == existing().id && incoming().createdAt == existing().createdAt && incoming().updatedAt == request.time;
+      allow delete: if isAdmin() && isValidId(inviteId);
     }
 
     // Authenticated staff profiles (PII protected: owner or admin only)
     match /staffUsers/{uid} {
       allow get: if isVerifiedUser() && isValidId(uid) && (request.auth.uid == uid || isAdmin());
-      allow list: if isVerifiedUser() && (isBootstrapAdmin() || existing().uid == request.auth.uid);
-      allow create: if isAdmin() && isValidId(uid) && isValidStaffUser(incoming()) && incoming().uid == uid && incoming().createdAt == request.time && incoming().updatedAt == request.time;
+      allow list: if isVerifiedUser() && (isBootstrapAdmin() || existing().uid == request.auth.uid || (('adminEmails' in existing()) && request.auth.token.email.lower() in existing().adminEmails));
+      allow create: if isVerifiedUser() &&
+        isValidId(uid) &&
+        isValidStaffUser(incoming()) &&
+        incoming().uid == uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time && (
+          isAdmin() ||
+          (
+            request.auth.uid == uid &&
+            'inviteId' in incoming() &&
+            incoming().email == request.auth.token.email.lower() &&
+            incoming().isActive == true &&
+            exists(/databases/$(database)/documents/staffInvites/$(incoming().inviteId)) &&
+            get(/databases/$(database)/documents/staffInvites/$(incoming().inviteId)).data.email == request.auth.token.email.lower() &&
+            incoming().role == get(/databases/$(database)/documents/staffInvites/$(incoming().inviteId)).data.role &&
+            incoming().nama == get(/databases/$(database)/documents/staffInvites/$(incoming().inviteId)).data.nama &&
+            (!('assignedGroup' in get(/databases/$(database)/documents/staffInvites/$(incoming().inviteId)).data) || (('assignedGroup' in incoming()) && incoming().assignedGroup == get(/databases/$(database)/documents/staffInvites/$(incoming().inviteId)).data.assignedGroup)) &&
+            (!('assignedTahfidzGroup' in get(/databases/$(database)/documents/staffInvites/$(incoming().inviteId)).data) || (('assignedTahfidzGroup' in incoming()) && incoming().assignedTahfidzGroup == get(/databases/$(database)/documents/staffInvites/$(incoming().inviteId)).data.assignedTahfidzGroup)) &&
+            (!('assignedClass' in get(/databases/$(database)/documents/staffInvites/$(incoming().inviteId)).data) || (('assignedClass' in incoming()) && incoming().assignedClass == get(/databases/$(database)/documents/staffInvites/$(incoming().inviteId)).data.assignedClass)) &&
+            (!('teacherId' in get(/databases/$(database)/documents/staffInvites/$(incoming().inviteId)).data) || (('teacherId' in incoming()) && incoming().teacherId == get(/databases/$(database)/documents/staffInvites/$(incoming().inviteId)).data.teacherId))
+          )
+        );
       allow update: if isAdmin() && isValidId(uid) && isValidStaffUser(incoming()) && incoming().uid == existing().uid && incoming().createdAt == existing().createdAt && incoming().updatedAt == request.time;
       allow delete: if isAdmin() && isValidId(uid);
     }
@@ -331,7 +426,7 @@ service cloud.firestore {
     // Teacher & homeroom directory (PII protected: matching email or admin)
     match /staffDirectory/{staffId} {
       allow get: if isVerifiedUser() && isValidId(staffId) && (isAdmin() || (('email' in existing()) && existing().email == request.auth.token.email.lower()));
-      allow list: if isVerifiedUser() && (isBootstrapAdmin() || existing().email == request.auth.token.email.lower());
+      allow list: if isVerifiedUser() && (isBootstrapAdmin() || (('email' in existing()) && existing().email == request.auth.token.email.lower()) || (('adminEmails' in existing()) && request.auth.token.email.lower() in existing().adminEmails));
       allow create: if isAdmin() && isValidId(staffId) && isValidStaffDirectoryItem(incoming()) && incoming().id == staffId && incoming().createdAt == request.time && incoming().updatedAt == request.time;
       allow update: if isAdmin() && isValidId(staffId) && isValidStaffDirectoryItem(incoming()) && incoming().id == existing().id && incoming().createdAt == existing().createdAt && incoming().updatedAt == request.time;
       allow delete: if isAdmin() && isValidId(staffId);
@@ -340,7 +435,7 @@ service cloud.firestore {
     // Teacher access link requests (created by signed-in Google teacher, approved by Admin)
     match /accessRequests/{uid} {
       allow get: if isVerifiedUser() && isValidId(uid) && (request.auth.uid == uid || isAdmin());
-      allow list: if isVerifiedUser() && (isBootstrapAdmin() || existing().uid == request.auth.uid);
+      allow list: if isVerifiedUser() && (isBootstrapAdmin() || existing().uid == request.auth.uid || (('adminEmails' in existing()) && request.auth.token.email.lower() in existing().adminEmails));
       allow create: if isVerifiedUser() &&
         isValidId(uid) &&
         request.auth.uid == uid &&
@@ -359,10 +454,10 @@ service cloud.firestore {
           isAdmin() ||
           (
             request.auth.uid == uid &&
-            existing().status == 'pending' &&
+            existing().status in ['pending', 'rejected'] &&
             incoming().status == 'pending' &&
             incoming().email == existing().email &&
-            incoming().diff(existing()).affectedKeys().hasOnly(['nama', 'requestedRole', 'requestedNote', 'updatedAt'])
+            incoming().diff(existing()).affectedKeys().hasOnly(['nama', 'requestedRole', 'requestedNote', 'status', 'updatedAt'])
           )
         );
       allow delete: if isVerifiedUser() && isValidId(uid) && (isAdmin() || request.auth.uid == uid);
@@ -515,7 +610,7 @@ service cloud.firestore {
     // Global rapor header & signatory settings (Admin-only)
     match /raporConfig/{configId} {
       allow get: if isAdmin() && isValidId(configId) && configId == 'main';
-      allow list: if isBootstrapAdmin();
+      allow list: if isVerifiedUser() && (isBootstrapAdmin() || (('adminEmails' in existing()) && request.auth.token.email.lower() in existing().adminEmails));
       allow create, update: if isAdmin() && isValidId(configId) && configId == 'main' && isValidRaporSettings(incoming()) && incoming().updatedAt == request.time;
       allow delete: if isAdmin() && isValidId(configId);
     }
@@ -523,7 +618,7 @@ service cloud.firestore {
     // Rapor print status (Admin-only)
     match /raporStatuses/{nisn} {
       allow get: if isAdmin() && isValidId(nisn);
-      allow list: if isBootstrapAdmin();
+      allow list: if isVerifiedUser() && (isBootstrapAdmin() || (('adminEmails' in existing()) && request.auth.token.email.lower() in existing().adminEmails));
       allow create, update: if isAdmin() && isValidId(nisn) && isValidRaporStatus(incoming()) && incoming().nisn == nisn && incoming().updatedAt == request.time;
       allow delete: if isAdmin() && isValidId(nisn);
     }
@@ -531,7 +626,7 @@ service cloud.firestore {
     // Rapor batch print logs (Admin-only)
     match /raporLogs/{logId} {
       allow get: if isAdmin() && isValidId(logId);
-      allow list: if isBootstrapAdmin();
+      allow list: if isVerifiedUser() && (isBootstrapAdmin() || (('adminEmails' in existing()) && request.auth.token.email.lower() in existing().adminEmails));
       allow create: if isAdmin() && isValidId(logId) && isValidRaporLog(incoming()) && incoming().id == logId && incoming().createdAt == request.time;
       allow update: if false;
       allow delete: if isAdmin() && isValidId(logId);

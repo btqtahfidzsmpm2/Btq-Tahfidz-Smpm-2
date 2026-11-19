@@ -181,13 +181,15 @@ export const storage = {
     entries: Array<{ nisn: string; status: 'Hadir' | 'Sakit' | 'Izin' | 'Alpa' }>,
     sesi: 'btq' | 'tahfidz',
     tanggal: string
-  ): { savedCount: number } {
-    if (entries.length === 0) return { savedCount: 0 };
+  ): { savedCount: number; savedRecords: AbsensiRecord[]; updatedStudents: Student[] } {
+    if (entries.length === 0) return { savedCount: 0, savedRecords: [], updatedStudents: [] };
 
     const absensiList = [...this.getAbsensi()];
     const students = this.getStudents();
+    const savedRecords: AbsensiRecord[] = [];
+    const updatedStudentMap = new Map<string, Student>();
 
-    entries.forEach((entry, idx) => {
+    entries.forEach(entry => {
       const existingIdx = absensiList.findIndex(
         a => a.nisn === entry.nisn && a.tanggal === tanggal && a.sesi === sesi
       );
@@ -208,6 +210,7 @@ export const storage = {
       } else {
         absensiList.unshift(record);
       }
+      savedRecords.push(record);
 
       const sIdx = students.findIndex(s => s.nisn === entry.nisn);
       if (sIdx !== -1) {
@@ -216,19 +219,24 @@ export const storage = {
           const hadirCount = studentAbs.filter(a => a.status === 'Hadir').length;
           students[sIdx].kehadiranPersen = Math.round((hadirCount / studentAbs.length) * 100);
         }
+        updatedStudentMap.set(students[sIdx].nisn, students[sIdx]);
       }
     });
 
     this.saveAbsensi(absensiList);
     this.saveStudents(students);
-    return { savedCount: entries.length };
+    return {
+      savedCount: entries.length,
+      savedRecords,
+      updatedStudents: Array.from(updatedStudentMap.values())
+    };
   },
 
   deleteAttendanceEntry(
     nisn: string,
     sesi: 'btq' | 'tahfidz',
     tanggal: string
-  ): void {
+  ): Student | undefined {
     const absensiList = this.getAbsensi().filter(
       a => !(a.nisn === nisn && a.tanggal === tanggal && a.sesi === sesi)
     );
@@ -236,6 +244,7 @@ export const storage = {
 
     const students = this.getStudents();
     const sIdx = students.findIndex(s => s.nisn === nisn);
+    let updatedStudent: Student | undefined;
     if (sIdx !== -1) {
       const studentAbs = absensiList.filter(a => a.nisn === nisn);
       if (studentAbs.length > 0) {
@@ -245,7 +254,9 @@ export const storage = {
         students[sIdx].kehadiranPersen = 100;
       }
       this.saveStudents(students);
+      updatedStudent = students[sIdx];
     }
+    return updatedStudent;
   },
 
   addStudent(student: Omit<Student, 'id'>): Student {
@@ -571,7 +582,8 @@ export const storage = {
         role: 'guru_ngaji',
         kelompokBTQ: kelompokArr.length > 0 ? kelompokArr.join(', ') : existing?.kelompokBTQ || 'BTQ REGULER',
         ruangan: ruanganArr.length > 0 ? ruanganArr.slice(0, 3).join(' / ') : existing?.ruangan || 'RUANGAN KELAS',
-        kontak: existing?.kontak || undefined
+        kontak: existing?.kontak || undefined,
+        email: existing?.email || undefined
       });
     });
 
@@ -592,7 +604,8 @@ export const storage = {
         kelompokBTQ: halaqahStr,
         kelompokTahfidz: halaqahStr,
         ruangan: ruanganArr.length > 0 ? ruanganArr.slice(0, 3).join(' / ') : existing?.ruangan || 'RUANGAN TAHFIDZ',
-        kontak: existing?.kontak || undefined
+        kontak: existing?.kontak || undefined,
+        email: existing?.email || undefined
       });
     });
 
@@ -779,6 +792,7 @@ export const storage = {
       kelompok: string;
       ruangan: string;
       kontak?: string;
+      email?: string;
     }>,
     role: 'guru_ngaji' | 'guru_tahfidz'
   ): { added: number; updated: number; total: number; teachers: Teacher[] } {
@@ -805,6 +819,7 @@ export const storage = {
         inc.kelompok.trim() || (role === 'guru_tahfidz' ? 'HALAQAH TAHFIDZ' : 'BTQ REGULER');
       const cleanRoom =
         inc.ruangan.trim() || (role === 'guru_tahfidz' ? 'RUANGAN TAHFIDZ' : 'RUANGAN KELAS');
+      const cleanEmail = inc.email?.trim().toLowerCase() || existingTeacher?.email;
 
       if (existingTeacher) {
         map.set(key, {
@@ -813,7 +828,8 @@ export const storage = {
           kelompokBTQ: cleanGroup,
           kelompokTahfidz: role === 'guru_tahfidz' ? cleanGroup : existingTeacher.kelompokTahfidz,
           ruangan: cleanRoom,
-          kontak: inc.kontak?.trim() || existingTeacher.kontak
+          kontak: inc.kontak?.trim() || existingTeacher.kontak,
+          email: cleanEmail
         });
         updated++;
       } else {
@@ -824,7 +840,8 @@ export const storage = {
           kelompokBTQ: cleanGroup,
           kelompokTahfidz: role === 'guru_tahfidz' ? cleanGroup : undefined,
           ruangan: cleanRoom,
-          kontak: inc.kontak?.trim() || undefined
+          kontak: inc.kontak?.trim() || undefined,
+          email: inc.email?.trim().toLowerCase() || undefined
         });
         added++;
       }
@@ -995,14 +1012,24 @@ export const storage = {
       statusPresensi?: 'Hadir' | 'Sakit' | 'Izin' | 'Alpa';
     }>,
     pengajar: string
-  ): { savedCount: number } {
-    if (evaluations.length === 0) return { savedCount: 0 };
+  ): {
+    savedCount: number;
+    savedBacaan: BacaanRecord[];
+    savedAbsensi: AbsensiRecord[];
+    updatedStudents: Student[];
+  } {
+    if (evaluations.length === 0) {
+      return { savedCount: 0, savedBacaan: [], savedAbsensi: [], updatedStudents: [] };
+    }
 
     const students = this.getStudents();
     const bacaanList = [...this.getBacaan()];
     const absensiList = [...this.getAbsensi()];
+    const savedBacaan: BacaanRecord[] = [];
+    const savedAbsensi: AbsensiRecord[] = [];
+    const updatedStudentMap = new Map<string, Student>();
 
-    evaluations.forEach((item, idx) => {
+    evaluations.forEach(item => {
       // 1. Upsert Bacaan record for (nisn, tanggal)
       const existingBacaanIdx = bacaanList.findIndex(
         b => b.nisn === item.nisn && b.tanggal === item.tanggal
@@ -1027,6 +1054,7 @@ export const storage = {
       } else {
         bacaanList.unshift(recordData);
       }
+      savedBacaan.push(recordData);
 
       // 2. Upsert Absensi record if provided
       if (item.statusPresensi) {
@@ -1050,6 +1078,7 @@ export const storage = {
         } else {
           absensiList.unshift(absData);
         }
+        savedAbsensi.push(absData);
       }
 
       // 3. Update Student's capaianTerakhir & kehadiranPersen
@@ -1066,6 +1095,7 @@ export const storage = {
           const hadirCount = studentAbs.filter(a => a.status === 'Hadir').length;
           students[sIdx].kehadiranPersen = Math.round((hadirCount / studentAbs.length) * 100);
         }
+        updatedStudentMap.set(students[sIdx].nisn, students[sIdx]);
       }
     });
 
@@ -1073,7 +1103,12 @@ export const storage = {
     this.saveBacaan(bacaanList);
     this.saveAbsensi(absensiList);
 
-    return { savedCount: evaluations.length };
+    return {
+      savedCount: evaluations.length,
+      savedBacaan,
+      savedAbsensi,
+      updatedStudents: Array.from(updatedStudentMap.values())
+    };
   },
 
   /**
@@ -1091,8 +1126,8 @@ export const storage = {
       statusPresensi?: 'Hadir' | 'Sakit' | 'Izin' | 'Alpa';
     },
     pengajar: string
-  ): void {
-    this.saveBatchBacaanEvaluations([item], pengajar);
+  ) {
+    return this.saveBatchBacaanEvaluations([item], pengajar);
   },
 
   getRaporSettings(): RaporSettings {

@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { Teacher } from '../../types';
 import { storage } from '../../services/storage';
+import { cloudDb } from '../../services/cloudDb';
 import { authService, slugifyUsername, DEFAULT_PASSWORDS } from '../../services/auth';
 import { splitGroupTokens } from '../../utils/access';
-import { X, UserCheck, BookOpen, Award, KeyRound, Eye, EyeOff, User } from 'lucide-react';
+import { X, UserCheck, BookOpen, Award, KeyRound, Eye, EyeOff, User, Mail } from 'lucide-react';
 
 interface TeacherModalProps {
   isOpen: boolean;
@@ -27,6 +28,7 @@ export const TeacherModal: React.FC<TeacherModalProps> = ({
   const [kelompokTahfidz, setKelompokTahfidz] = useState('HALAQAH TAHFIDZ');
   const [ruangan, setRuangan] = useState('RUANGAN 7A');
   const [kontak, setKontak] = useState('');
+  const [email, setEmail] = useState('');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -56,6 +58,7 @@ export const TeacherModal: React.FC<TeacherModalProps> = ({
 
       setRuangan(teacherToEdit.ruangan);
       setKontak(teacherToEdit.kontak || '');
+      setEmail(teacherToEdit.email || '');
       const existingAcc = authService
         .getAccounts()
         .find(
@@ -73,6 +76,7 @@ export const TeacherModal: React.FC<TeacherModalProps> = ({
       setKelompokTahfidz('HALAQAH TAHFIDZ');
       setRuangan('RUANGAN 7A');
       setKontak('');
+      setEmail('');
       setUsername('');
       setUsernameEditedManually(false);
     }
@@ -117,6 +121,7 @@ export const TeacherModal: React.FC<TeacherModalProps> = ({
       ? kelompokTahfidz.trim().toUpperCase() || 'HALAQAH TAHFIDZ'
       : undefined;
 
+    const cleanEmail = email.trim().toLowerCase() || undefined;
     let savedTeacher: Teacher;
     if (teacherToEdit) {
       storage.updateTeacher(teacherToEdit.id, {
@@ -125,7 +130,8 @@ export const TeacherModal: React.FC<TeacherModalProps> = ({
         kelompokBTQ: combinedBTQ,
         kelompokTahfidz: tahfidzGroupValue,
         ruangan: ruangan.trim(),
-        kontak: kontak.trim()
+        kontak: kontak.trim(),
+        email: cleanEmail
       });
       savedTeacher = {
         ...teacherToEdit,
@@ -134,7 +140,8 @@ export const TeacherModal: React.FC<TeacherModalProps> = ({
         kelompokBTQ: combinedBTQ,
         kelompokTahfidz: tahfidzGroupValue,
         ruangan: ruangan.trim(),
-        kontak: kontak.trim()
+        kontak: kontak.trim(),
+        email: cleanEmail
       };
     } else {
       savedTeacher = storage.addTeacher({
@@ -143,7 +150,18 @@ export const TeacherModal: React.FC<TeacherModalProps> = ({
         kelompokBTQ: combinedBTQ,
         kelompokTahfidz: tahfidzGroupValue,
         ruangan: ruangan.trim(),
-        kontak: kontak.trim()
+        kontak: kontak.trim(),
+        email: cleanEmail
+      });
+    }
+
+    if (cloudDb.isCloudAuthenticated()) {
+      void cloudDb.upsertTeacherCloud(savedTeacher).catch(err => {
+        onNotify(
+          'error',
+          'Gagal Sinkronisasi Cloud',
+          err instanceof Error ? err.message : 'Data guru belum tersinkron ke Cloud.'
+        );
       });
     }
 
@@ -322,6 +340,25 @@ export const TeacherModal: React.FC<TeacherModalProps> = ({
                 className="w-full p-2 border border-slate-300 rounded-lg text-xs font-mono bg-white focus:outline-none focus:ring-1 focus:ring-emerald-500"
               />
             </div>
+          </div>
+
+          <div>
+            <label className="text-xs font-bold text-slate-700 block mb-1">
+              Email Akun Google Guru (Opsional — untuk Sinkron Cloud Otomatis):
+            </label>
+            <div className="relative">
+              <Mail className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
+              <input
+                type="email"
+                value={email}
+                onChange={e => setEmail(e.target.value)}
+                placeholder="Misal: guru.btq@gmail.com"
+                className="w-full pl-8 pr-3 py-2 border border-slate-300 rounded-lg text-xs bg-white focus:outline-none focus:ring-1 focus:ring-emerald-500"
+              />
+            </div>
+            <p className="text-[10px] text-slate-500 mt-1">
+              Saat guru login dengan Akun Google di atas, seluruh data siswa kelas binaannya langsung tersinkron otomatis.
+            </p>
           </div>
 
           {/* Credentials Box */}

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Student } from '../../types';
 import { storage } from '../../services/storage';
+import { cloudDb } from '../../services/cloudDb';
 import { X, GraduationCap } from 'lucide-react';
 
 interface InputUjianModalProps {
@@ -69,7 +70,7 @@ export const InputUjianModal: React.FC<InputUjianModalProps> = ({
     }
 
     const currentStudent = students.find(s => s.nisn === nisn);
-    storage.updateUjian(nisn, {
+    const ujianPayload = {
       tanggal,
       jenis,
       nilai,
@@ -77,7 +78,28 @@ export const InputUjianModal: React.FC<InputUjianModalProps> = ({
       natijah,
       kelulusan,
       keterangan
-    });
+    };
+    storage.updateUjian(nisn, ujianPayload);
+
+    if (cloudDb.isCloudAuthenticated()) {
+      const updatedStudent =
+        storage.getStudents().find(s => s.nisn === nisn) ||
+        (currentStudent ? { ...currentStudent, ujian: ujianPayload } : undefined);
+      if (updatedStudent) {
+        const allBacaan = storage.getBacaan().filter(b => b.nisn === nisn);
+        const allTahfidz = storage.getTahfidz().filter(t => t.nisn === nisn);
+        const allAbsensi = storage.getAbsensi().filter(a => a.nisn === nisn);
+        void cloudDb
+          .saveUjianCloud(updatedStudent, allBacaan, allTahfidz, allAbsensi)
+          .catch(err => {
+            onNotify(
+              'error',
+              'Gagal Sinkronisasi Cloud',
+              err instanceof Error ? err.message : 'Hasil ujian belum tersinkron ke Cloud.'
+            );
+          });
+      }
+    }
 
     onNotify(
       'success',

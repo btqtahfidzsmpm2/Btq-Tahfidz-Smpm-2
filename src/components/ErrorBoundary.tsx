@@ -19,10 +19,29 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
   };
 
   public static getDerivedStateFromError(error: Error): ErrorBoundaryState {
+    let message = 'Terjadi gangguan saat memproses data aplikasi.';
+    let detail: string | null = error.message || null;
+
+    try {
+      const parsed = JSON.parse(error.message);
+      if (parsed && typeof parsed === 'object' && 'operationType' in parsed) {
+        const rawErr = String(parsed.error || '');
+        if (rawErr.toLowerCase().includes('permission') || rawErr.toLowerCase().includes('insufficient')) {
+          message =
+            'Akses sinkronisasi Cloud ditolak atau akun Google ini belum diotorisasi untuk data tersebut. Hubungi Admin (btqtahfidzsmpm2@gmail.com) untuk menyetujui/menyinkronkan email Anda.';
+        } else {
+          message = 'Terjadi gangguan koneksi sinkronisasi Cloud Firestore. Periksa jaringan internet Anda lalu muat ulang.';
+        }
+        detail = `${parsed.operationType} · ${parsed.path || '-'} — ${rawErr}`;
+      }
+    } catch {
+      // plain error message
+    }
+
     return {
       hasError: true,
-      message: 'Terjadi gangguan saat memproses data aplikasi.',
-      detail: error.message || null
+      message,
+      detail
     };
   }
 

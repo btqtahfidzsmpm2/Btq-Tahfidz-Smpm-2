@@ -9,6 +9,9 @@ export interface UserSession {
   username: string;
   role: Role;
   nama: string;
+  email?: string;
+  authUid?: string;
+  authProvider?: 'local' | 'google';
   assignedGroup?: string; // For guru_ngaji (Kelas BTQ, can hold 2+ classes separated by , or &)
   assignedTahfidzGroup?: string; // For guru_tahfidz (Halaqah / Kelas Tahfidz)
   assignedClass?: string; // For wali_kelas (e.g., "7D" or "7A")
@@ -23,6 +26,7 @@ export interface UserAccount {
   salt: string;
   role: Role;
   nama: string;
+  email?: string;
   teacherId?: string;
   assignedGroup?: string;
   assignedTahfidzGroup?: string;
@@ -60,6 +64,54 @@ export interface Teacher {
   kelompokTahfidz?: string;
   ruangan: string;
   kontak?: string;
+  email?: string;
+}
+
+export interface StaffDirectoryEntry {
+  id: string;
+  nama: string;
+  role: Role;
+  kelompokBTQ: string;
+  kelompokTahfidz?: string;
+  assignedClass?: string;
+  ruangan: string;
+  kontak?: string;
+  email?: string;
+}
+
+export interface StaffInvite {
+  id: string;
+  email: string;
+  nama: string;
+  role: Role;
+  teacherId?: string;
+  assignedGroup?: string;
+  assignedTahfidzGroup?: string;
+  assignedClass?: string;
+}
+
+export interface AccessRequest {
+  uid: string;
+  email: string;
+  nama: string;
+  requestedRole: Role;
+  requestedNote: string;
+  status: 'pending' | 'approved' | 'rejected';
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface PublicStudentReport {
+  student: Student;
+  recentBacaan: BacaanRecord[];
+  recentTahfidz: TahfidzRecord[];
+  absensiSummary?: {
+    hadir: number;
+    sakit: number;
+    izin: number;
+    alpa: number;
+    persen: number;
+  };
 }
 
 export interface UjianRecord {

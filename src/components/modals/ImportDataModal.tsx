@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Student } from '../../types';
 import { storage } from '../../services/storage';
+import { cloudDb } from '../../services/cloudDb';
 import { formatBtqClassWithGender } from '../../utils/access';
 import {
   X,
@@ -45,6 +46,7 @@ interface ParsedTeacherRow {
   kelompok: string;
   ruangan: string;
   kontak?: string;
+  email?: string;
 }
 
 const NGAJI_HEADER =
@@ -61,17 +63,17 @@ const TAHFIDZ_SAMPLE_CSV = `${TAHFIDZ_HEADER}
 0082600002,NAMA SISWA BTQ 2,L,7A,HALAQAH TAHFIDZ JUZ 30,USTADZ FAUZAN,MASJID AL-IKHLAS,Juz 30 & 29,1.5 Juz,QS. An-Naba: 1-40,Sangat Lancar (Mumtaz),Mutqin dan siap tasmi
 0082600003,NAMA SANTRI TAHFIDZ 3,P,8B,HALAQAH TAHFIDZ MUTQIN,USTADZAH AISYAH,RUANGAN TAHFIDZ,Juz 30,1 Juz,QS. Al-Mulk: 1-15,Lancar (Jayyid Jiddan),Perhatikan panjang pendek mad`;
 
-const GURU_BTQ_HEADER = 'NAMA_GURU_BTQ,KELOMPOK_BTQ,RUANGAN_BTQ,KONTAK_WA';
+const GURU_BTQ_HEADER = 'NAMA_GURU_BTQ,KELOMPOK_BTQ,RUANGAN_BTQ,KONTAK_WA,EMAIL_GOOGLE';
 
 const GURU_BTQ_SAMPLE_CSV = `${GURU_BTQ_HEADER}
-USTADZAH SITI,TILAWATI 4 PI,RUANGAN 7E,081234567890
-USTADZ AHMAD,AL-QUR'AN PA,RUANGAN 7A,081298765432`;
+USTADZAH SITI,TILAWATI 4 PI,RUANGAN 7E,081234567890,ustadzahsiti@gmail.com
+USTADZ AHMAD,AL-QUR'AN PA,RUANGAN 7A,081298765432,ustadzahmad@gmail.com`;
 
-const GURU_TAHFIDZ_HEADER = 'NAMA_GURU_TAHFIDZ,HALAQAH_TAHFIDZ,RUANGAN_TAHFIDZ,KONTAK_WA';
+const GURU_TAHFIDZ_HEADER = 'NAMA_GURU_TAHFIDZ,HALAQAH_TAHFIDZ,RUANGAN_TAHFIDZ,KONTAK_WA,EMAIL_GOOGLE';
 
 const GURU_TAHFIDZ_SAMPLE_CSV = `${GURU_TAHFIDZ_HEADER}
-USTADZ FAUZAN,HALAQAH TAHFIDZ JUZ 30,MASJID AL-IKHLAS,081345678901
-USTADZAH AISYAH,HALAQAH TAHFIDZ MUTQIN,RUANGAN TAHFIDZ,081356789012`;
+USTADZ FAUZAN,HALAQAH TAHFIDZ JUZ 30,MASJID AL-IKHLAS,081345678901,ustadzfauzan@gmail.com
+USTADZAH AISYAH,HALAQAH TAHFIDZ MUTQIN,RUANGAN TAHFIDZ,081356789012,ustadzahaisyah@gmail.com`;
 
 function parseCSVLine(line: string): string[] {
   const delimiter = line.includes('\t') ? '\t' : ',';
@@ -331,8 +333,9 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({
           (cols[2] || '').trim() ||
           (effectiveMode === 'guru_tahfidz' ? 'RUANGAN TAHFIDZ' : 'RUANGAN KELAS');
         const kontak = (cols[3] || '').trim() || undefined;
+        const email = (cols[4] || '').trim().toLowerCase() || undefined;
 
-        validTeachers.push({ nama, kelompok, ruangan, kontak });
+        validTeachers.push({ nama, kelompok, ruangan, kontak, email });
       });
 
       setParsedTeacherRows(validTeachers);
@@ -437,16 +440,18 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({
     );
   };
 
-  const handleExecuteImport = () => {
+  const handleExecuteImport = async () => {
     if (isImporting) return;
     setIsImporting(true);
     try {
+      let importedOk = false;
       if (importMode === 'ngaji') {
         if (parsedNgajiRows.length === 0) {
           onNotify('error', 'Tidak Ada Data BTQ', 'Silakan tempel atau unggah file data Siswa & Guru BTQ yang valid.');
           return;
         }
         const res = storage.importStudentsBatch(parsedNgajiRows);
+        importedOk = true;
         onNotify(
           'success',
           'Import Data Siswa & Guru BTQ Berhasil',
@@ -458,6 +463,7 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({
           return;
         }
         const res = storage.importTahfidzBatch(parsedTahfidzRows);
+        importedOk = true;
         onNotify(
           'success',
           'Import Data Santri & Guru Tahfidz Berhasil',
@@ -469,6 +475,7 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({
           return;
         }
         const res = storage.importTeachersBatch(parsedTeacherRows, 'guru_ngaji');
+        importedOk = true;
         onNotify(
           'success',
           'Import Daftar Guru BTQ Berhasil',
@@ -480,11 +487,32 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({
           return;
         }
         const res = storage.importTeachersBatch(parsedTeacherRows, 'guru_tahfidz');
+        importedOk = true;
         onNotify(
           'success',
           'Import Daftar Guru Tahfidz Berhasil',
           `Berhasil memproses ${parsedTeacherRows.length} Guru Tahfidz (${res.added} baru, ${res.updated} diperbarui) khusus pada Dashboard Guru Tahfidz.`
         );
+      }
+
+      if (importedOk && cloudDb.isCloudAuthenticated()) {
+        try {
+          await cloudDb.pushAllLocalToCloud({
+            students: storage.getStudents(),
+            teachers: storage.getTeachers(),
+            bacaan: storage.getBacaan(),
+            tahfidz: storage.getTahfidz(),
+            absensi: storage.getAbsensi(),
+            raporSettings: storage.getRaporSettings()
+          });
+          await cloudDb.resyncAllCloudAccess();
+        } catch (err) {
+          onNotify(
+            'error',
+            'Sebagian Sinkronisasi Cloud Gagal',
+            err instanceof Error ? err.message : 'Silakan tekan tombol Sinkronkan ke Cloud pada panel Admin.'
+          );
+        }
       }
 
       onSuccess();
@@ -994,7 +1022,8 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({
                       ['1', 'NAMA_GURU_BTQ', 'USTADZAH SITI', 'Nama lengkap Ustadz/ah pengajar kelas BTQ.'],
                       ['2', 'KELOMPOK_BTQ', 'TILAWATI 4 PI, TILAWATI 5 PI', 'Kelas BTQ yang diampu (pisahkan dengan koma jika >1 kelas).'],
                       ['3', 'RUANGAN_BTQ', 'RUANGAN 7E', 'Lokasi ruang mengajar BTQ.'],
-                      ['4', 'KONTAK_WA', '081234567890', 'Nomor WhatsApp guru BTQ (opsional).']
+                      ['4', 'KONTAK_WA', '081234567890', 'Nomor WhatsApp guru BTQ (opsional).'],
+                      ['5', 'EMAIL_GOOGLE', 'ustadzahsiti@gmail.com', 'Email Akun Google guru untuk Sinkron Cloud (opsional).']
                     ].map(([no, col, ex, desc]) => (
                       <tr key={no}>
                         <td className="p-2.5 font-mono">{no}</td>
@@ -1024,7 +1053,8 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({
                       ['1', 'NAMA_GURU_TAHFIDZ', 'USTADZ FAUZAN', 'Nama lengkap Ustadz/ah pembimbing program Tahfidz.'],
                       ['2', 'HALAQAH_TAHFIDZ', 'HALAQAH TAHFIDZ JUZ 30', 'Nama halaqah Tahfidz binaan.'],
                       ['3', 'RUANGAN_TAHFIDZ', 'MASJID AL-IKHLAS', 'Lokasi halaqah Tahfidz berlangsung.'],
-                      ['4', 'KONTAK_WA', '081345678901', 'Nomor WhatsApp pembimbing Tahfidz (opsional).']
+                      ['4', 'KONTAK_WA', '081345678901', 'Nomor WhatsApp pembimbing Tahfidz (opsional).'],
+                      ['5', 'EMAIL_GOOGLE', 'ustadzfauzan@gmail.com', 'Email Akun Google pembimbing untuk Sinkron Cloud (opsional).']
                     ].map(([no, col, ex, desc]) => (
                       <tr key={no}>
                         <td className="p-2.5 font-mono">{no}</td>

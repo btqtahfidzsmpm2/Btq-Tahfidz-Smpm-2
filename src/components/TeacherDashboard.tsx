@@ -10,7 +10,9 @@ import {
   AbsensiRecord,
   RaporSettings,
   RaporPrintStatus,
-  RaporPrintBatchLog
+  RaporPrintBatchLog,
+  AccessRequest,
+  StaffInvite
 } from '../types';
 import { BatchEvaluationTable } from './BatchEvaluationTable';
 import { AccountSecurityPanel } from './AccountSecurityPanel';
@@ -73,6 +75,29 @@ interface TeacherDashboardProps {
   raporSettings?: RaporSettings;
   raporPrintStatuses?: Record<string, RaporPrintStatus>;
   raporPrintLogs?: RaporPrintBatchLog[];
+  cloudConnected?: boolean;
+  accessRequests?: AccessRequest[];
+  staffInvites?: StaffInvite[];
+  onApproveAccessRequest?: (params: {
+    request: AccessRequest;
+    role: UserSession['role'];
+    nama: string;
+    assignedGroup?: string;
+    assignedTahfidzGroup?: string;
+    assignedClass?: string;
+  }) => Promise<void>;
+  onRejectAccessRequest?: (uid: string) => Promise<void>;
+  onSaveCloudInvite?: (params: {
+    email: string;
+    nama: string;
+    role: UserSession['role'];
+    assignedGroup?: string;
+    assignedTahfidzGroup?: string;
+    assignedClass?: string;
+  }) => Promise<void>;
+  onDeleteCloudInvite?: (inviteId: string) => Promise<void>;
+  onResyncCloudAccess?: () => Promise<void>;
+  onPushLocalToCloud?: () => Promise<void>;
   onRefreshAccounts: () => void;
   onOpenChangePasswordModal: () => void;
   onOpenBacaanModal: (student?: Student) => void;
@@ -106,6 +131,15 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   raporSettings,
   raporPrintStatuses,
   raporPrintLogs,
+  cloudConnected,
+  accessRequests,
+  staffInvites,
+  onApproveAccessRequest,
+  onRejectAccessRequest,
+  onSaveCloudInvite,
+  onDeleteCloudInvite,
+  onResyncCloudAccess,
+  onPushLocalToCloud,
   onRefreshAccounts,
   onOpenChangePasswordModal,
   onOpenBacaanModal,
@@ -799,6 +833,15 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
           currentUser={user}
           accounts={accounts}
           logs={authLogs}
+          cloudConnected={cloudConnected}
+          accessRequests={accessRequests}
+          staffInvites={staffInvites}
+          onApproveAccessRequest={onApproveAccessRequest}
+          onRejectAccessRequest={onRejectAccessRequest}
+          onSaveCloudInvite={onSaveCloudInvite}
+          onDeleteCloudInvite={onDeleteCloudInvite}
+          onResyncCloudAccess={onResyncCloudAccess}
+          onPushLocalToCloud={onPushLocalToCloud}
           onRefreshAccounts={onRefreshAccounts}
           onNotify={onNotify}
         />

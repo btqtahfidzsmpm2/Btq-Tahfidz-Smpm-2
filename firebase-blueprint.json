@@ -21,12 +21,71 @@
           "minLength": 1,
           "maxLength": 120
         },
+        "inviteId": {
+          "type": "string",
+          "maxLength": 128
+        },
         "createdAt": {
           "type": "string",
           "format": "date-time"
         }
       },
       "required": ["uid", "email", "nama", "createdAt"]
+    },
+    "StaffInviteDoc": {
+      "title": "StaffInviteDoc",
+      "description": "Pre-authorized Google email invite allowing instant role & class sync when opened in another account.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "maxLength": 150
+        },
+        "nama": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "role": {
+          "type": "string",
+          "enum": ["admin", "guru_ngaji", "guru_tahfidz", "wali_kelas"]
+        },
+        "teacherId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "assignedGroup": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "assignedTahfidzGroup": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "assignedClass": {
+          "type": "string",
+          "maxLength": 30
+        },
+        "adminEmails": {
+          "type": "array"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["id", "email", "nama", "role", "createdAt", "updatedAt"]
     },
     "StaffUser": {
       "title": "StaffUser",
@@ -68,6 +127,13 @@
         "assignedClass": {
           "type": "string",
           "maxLength": 30
+        },
+        "inviteId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "adminEmails": {
+          "type": "array"
         },
         "isActive": {
           "type": "boolean"
@@ -127,6 +193,9 @@
           "type": "string",
           "maxLength": 150
         },
+        "adminEmails": {
+          "type": "array"
+        },
         "createdAt": {
           "type": "string",
           "format": "date-time"
@@ -170,6 +239,9 @@
         "status": {
           "type": "string",
           "enum": ["pending", "approved", "rejected"]
+        },
+        "adminEmails": {
+          "type": "array"
         },
         "createdAt": {
           "type": "string",
@@ -558,6 +630,9 @@
           "type": "string",
           "maxLength": 120
         },
+        "adminEmails": {
+          "type": "array"
+        },
         "updatedAt": {
           "type": "string",
           "format": "date-time"
@@ -601,6 +676,9 @@
         "tahunAjaran": {
           "type": "string",
           "maxLength": 40
+        },
+        "adminEmails": {
+          "type": "array"
         },
         "updatedAt": {
           "type": "string",
@@ -647,6 +725,9 @@
           "maxLength": 40
         },
         "nisnList": {
+          "type": "array"
+        },
+        "adminEmails": {
           "type": "array"
         },
         "createdAt": {
@@ -697,6 +778,10 @@
         "isTahfidz": {
           "type": "boolean"
         },
+        "pembimbingTahfidz": {
+          "type": "string",
+          "maxLength": 120
+        },
         "halaqahTahfidz": {
           "type": "string",
           "maxLength": 120
@@ -722,6 +807,15 @@
         "kehadiranPersen": {
           "type": "number"
         },
+        "recentBacaan": {
+          "type": "array"
+        },
+        "recentTahfidz": {
+          "type": "array"
+        },
+        "absensiSummary": {
+          "type": "object"
+        },
         "updatedAt": {
           "type": "string",
           "format": "date-time"
@@ -734,6 +828,10 @@
     "/admins/{uid}": {
       "schema": { "$ref": "#/entities/AdminDoc" },
       "description": "Verified administrator UID registry."
+    },
+    "/staffInvites/{inviteId}": {
+      "schema": { "$ref": "#/entities/StaffInviteDoc" },
+      "description": "Pre-authorized staff Google email invites enabling instant multi-account sync."
     },
     "/staffUsers/{uid}": {
       "schema": { "$ref": "#/entities/StaffUser" },

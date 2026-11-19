@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Student } from '../../types';
 import { storage } from '../../services/storage';
+import { cloudDb } from '../../services/cloudDb';
 import { TEACHERS_LIST, HOMEROOM_CLASSES } from '../../data/initialData';
 import { X, UserPlus, Edit3 } from 'lucide-react';
 
@@ -69,7 +70,7 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({
 
     if (studentToEdit) {
       // Update existing student
-      storage.updateStudent(studentToEdit.nisn, {
+      const updatedPatch = {
         nama: nama.trim().toUpperCase(),
         gender,
         kelas,
@@ -79,9 +80,36 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({
         waliKelas,
         isTahfidz,
         targetJuz: isTahfidz ? targetJuz : undefined
-      });
-      onNotify('success', 'Data Siswa Diperbarui', `Informasi ${nama.toUpperCase()} berhasil diperbarui di penyimpanan lokal.`);
-      onSuccess();
+      };
+      storage.updateStudent(studentToEdit.nisn, updatedPatch);
+      const updatedStudent: Student = {
+        ...studentToEdit,
+        ...updatedPatch
+      };
+
+      if (cloudDb.isCloudAuthenticated()) {
+        void cloudDb
+          .upsertStudentCloud(
+            updatedStudent,
+            storage.getBacaan(),
+            storage.getTahfidz(),
+            storage.getAbsensi()
+          )
+          .catch(err => {
+            onNotify(
+              'error',
+              'Gagal Sinkronisasi Cloud',
+              err instanceof Error ? err.message : 'Perubahan siswa belum tersinkron ke Cloud.'
+            );
+          });
+      }
+
+      onNotify(
+        'success',
+        'Data Siswa Diperbarui',
+        `Informasi ${nama.toUpperCase()} berhasil diperbarui${cloudDb.isCloudAuthenticated() ? ' & disinkronkan ke Cloud' : ''}.`
+      );
+      onSuccess(updatedStudent);
     } else {
       // Add new student
       const students = storage.getStudents();
@@ -120,6 +148,23 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({
         },
         kehadiranPersen: 100
       });
+
+      if (cloudDb.isCloudAuthenticated()) {
+        void cloudDb
+          .upsertStudentCloud(
+            newStudent,
+            storage.getBacaan(),
+            storage.getTahfidz(),
+            storage.getAbsensi()
+          )
+          .catch(err => {
+            onNotify(
+              'error',
+              'Gagal Sinkronisasi Cloud',
+              err instanceof Error ? err.message : 'Data siswa baru belum tersinkron ke Cloud.'
+            );
+          });
+      }
 
       onNotify('success', 'Siswa Baru Ditambahkan', `${nama} (${kelas}) berhasil didaftarkan ke sistem.`);
       onSuccess(newStudent);

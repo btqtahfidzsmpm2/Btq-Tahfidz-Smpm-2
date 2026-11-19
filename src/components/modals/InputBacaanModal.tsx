@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Student, UserSession } from '../../types';
 import { storage } from '../../services/storage';
+import { cloudDb } from '../../services/cloudDb';
 import { X, BookOpen } from 'lucide-react';
 
 interface InputBacaanModalProps {
@@ -57,7 +58,7 @@ export const InputBacaanModal: React.FC<InputBacaanModalProps> = ({
     }
 
     const currentStudent = students.find(s => s.nisn === nisn);
-    storage.addBacaan({
+    const savedRecord = storage.addBacaan({
       nisn,
       tanggal,
       tipe,
@@ -67,6 +68,22 @@ export const InputBacaanModal: React.FC<InputBacaanModalProps> = ({
       catatan,
       pengajar: user.nama
     });
+
+    if (cloudDb.isCloudAuthenticated()) {
+      const updatedStudent = storage.getStudents().find(s => s.nisn === nisn) || currentStudent;
+      const allBacaan = storage.getBacaan().filter(b => b.nisn === nisn);
+      const allTahfidz = storage.getTahfidz().filter(t => t.nisn === nisn);
+      const allAbsensi = storage.getAbsensi().filter(a => a.nisn === nisn);
+      void cloudDb
+        .saveBacaanCloud(savedRecord, updatedStudent, allBacaan, allTahfidz, allAbsensi)
+        .catch(err => {
+          onNotify(
+            'error',
+            'Gagal Sinkronisasi Cloud',
+            err instanceof Error ? err.message : 'Capaian bacaan belum tersinkron ke Cloud.'
+          );
+        });
+    }
 
     onNotify(
       'success',

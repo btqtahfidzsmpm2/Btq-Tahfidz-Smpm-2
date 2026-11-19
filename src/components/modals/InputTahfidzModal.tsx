@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Student, UserSession } from '../../types';
 import { storage } from '../../services/storage';
+import { cloudDb } from '../../services/cloudDb';
 import { X, Award } from 'lucide-react';
 
 interface InputTahfidzModalProps {
@@ -49,7 +50,7 @@ export const InputTahfidzModal: React.FC<InputTahfidzModalProps> = ({
     }
 
     const currentStudent = students.find(s => s.nisn === nisn);
-    storage.addTahfidz({
+    const savedRecord = storage.addTahfidz({
       nisn,
       tanggal,
       surat,
@@ -59,6 +60,22 @@ export const InputTahfidzModal: React.FC<InputTahfidzModalProps> = ({
       guru: user.nama,
       catatan
     });
+
+    if (cloudDb.isCloudAuthenticated()) {
+      const updatedStudent = storage.getStudents().find(s => s.nisn === nisn) || currentStudent;
+      const allBacaan = storage.getBacaan().filter(b => b.nisn === nisn);
+      const allTahfidz = storage.getTahfidz().filter(t => t.nisn === nisn);
+      const allAbsensi = storage.getAbsensi().filter(a => a.nisn === nisn);
+      void cloudDb
+        .saveTahfidzCloud(savedRecord, updatedStudent, allBacaan, allTahfidz, allAbsensi)
+        .catch(err => {
+          onNotify(
+            'error',
+            'Gagal Sinkronisasi Cloud',
+            err instanceof Error ? err.message : 'Setoran tahfidz belum tersinkron ke Cloud.'
+          );
+        });
+    }
 
     onNotify(
       'success',

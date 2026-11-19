@@ -111,6 +111,20 @@ export function matchesTeacherName(
 }
 
 /**
+ * Matches a student's BTQ/Halaqah group against a teacher's assigned multi-group string.
+ */
+export function matchesAssignedGroup(
+  studentGroup: string | undefined,
+  assignedGroup: string | undefined
+): boolean {
+  if (!studentGroup || !assignedGroup) return false;
+  const studentNorm = normalizeBtqGroupToken(studentGroup);
+  if (!studentNorm || studentNorm === '-') return false;
+  const tokens = splitGroupTokens(assignedGroup).map(normalizeBtqGroupToken);
+  return tokens.some(tok => tok === studentNorm);
+}
+
+/**
  * Returns students enrolled in Kelas BTQ strictly supervised by the Guru BTQ/Ngaji
  * (or all BTQ students for Admin), keeping Putri (PI) & Putra (PA) and each teacher's
  * own classes strictly isolated.

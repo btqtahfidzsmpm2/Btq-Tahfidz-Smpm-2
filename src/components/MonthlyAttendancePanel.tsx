@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { AbsensiRecord, Student, UserSession } from '../types';
 import { storage } from '../services/storage';
+import { cloudDb } from '../services/cloudDb';
 import { detectBtqClassGender, isValidBtqClass } from '../utils/access';
 import {
   computeStudentAttendanceSummary,
@@ -287,9 +288,49 @@ export const MonthlyAttendancePanel: React.FC<MonthlyAttendancePanelProps> = ({
     const nextStatus = order[(currIdx + 1) % order.length];
 
     if (nextStatus === null) {
-      storage.deleteAttendanceEntry(student.nisn, targetSesi, dateStr);
+      const delRes = storage.deleteAttendanceEntry(student.nisn, targetSesi, dateStr);
+      if (cloudDb.isCloudAuthenticated()) {
+        void cloudDb
+          .deleteAbsensiCloud(
+            student.nisn,
+            targetSesi,
+            dateStr,
+            delRes,
+            storage.getBacaan(),
+            storage.getTahfidz(),
+            storage.getAbsensi()
+          )
+          .catch(err => {
+            onNotify(
+              'error',
+              'Gagal Sinkronisasi Cloud',
+              err instanceof Error ? err.message : 'Hapus sel presensi belum tersinkron ke Cloud.'
+            );
+          });
+      }
     } else {
-      storage.saveAttendanceBatch([{ nisn: student.nisn, status: nextStatus }], targetSesi, dateStr);
+      const saveRes = storage.saveAttendanceBatch(
+        [{ nisn: student.nisn, status: nextStatus }],
+        targetSesi,
+        dateStr
+      );
+      if (cloudDb.isCloudAuthenticated()) {
+        void cloudDb
+          .saveAbsensiBatchCloud({
+            records: saveRes.savedRecords,
+            updatedStudents: saveRes.updatedStudents,
+            allBacaan: storage.getBacaan(),
+            allTahfidz: storage.getTahfidz(),
+            allAbsensi: storage.getAbsensi()
+          })
+          .catch(err => {
+            onNotify(
+              'error',
+              'Gagal Sinkronisasi Cloud',
+              err instanceof Error ? err.message : 'Update sel presensi belum tersinkron ke Cloud.'
+            );
+          });
+      }
     }
     onDataUpdated();
   };

@@ -18,7 +18,8 @@ export function verifySecuritySpec(): { passed: boolean; checks: string[] } {
     { name: 'Bootstrapped admin check', ok: content.includes('btqtahfidzsmpm2@gmail.com') },
     { name: 'ID regex & size guard', ok: content.includes('id.size() <= 128') && content.includes("id.matches('^[a-zA-Z0-9_\\\\-]+$')") },
     { name: 'Public reports forbids list', ok: /match \/publicReports\/\{nisn\}[\s\S]*?allow list:\s*if false;/.test(content) },
-    { name: 'Wali kelas excluded from editorEmails write', ok: content.includes('request.auth.token.email in existing().editorEmails') },
+    { name: 'Wali kelas excluded from editorEmails write', ok: content.includes('request.auth.token.email.lower() in existing().editorEmails') },
+    { name: 'Staff invites verified by email on self-claim', ok: content.includes('/staffInvites/') },
     { name: 'Server timestamp enforcement', ok: content.includes('request.time') }
   ];
 

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Student, UserSession, BacaanRecord, AbsensiRecord } from '../types';
 import { storage } from '../services/storage';
+import { cloudDb } from '../services/cloudDb';
 import { detectBtqClassGender, isValidBtqClass } from '../utils/access';
 import {
   Save,
@@ -248,7 +249,7 @@ export const BatchEvaluationTable: React.FC<BatchEvaluationTableProps> = ({
       second: '2-digit'
     });
 
-    storage.updateSingleStudentEvaluation(
+    const evalRes = storage.updateSingleStudentEvaluation(
       {
         nisn: rowToSave.nisn,
         tanggal,
@@ -261,6 +262,25 @@ export const BatchEvaluationTable: React.FC<BatchEvaluationTableProps> = ({
       },
       user.nama
     );
+
+    if (cloudDb.isCloudAuthenticated()) {
+      void cloudDb
+        .saveBatchBacaanEvaluationsCloud({
+          bacaanRecords: evalRes.savedBacaan,
+          absensiRecords: evalRes.savedAbsensi,
+          updatedStudents: evalRes.updatedStudents,
+          allBacaan: storage.getBacaan(),
+          allTahfidz: storage.getTahfidz(),
+          allAbsensi: storage.getAbsensi()
+        })
+        .catch(err => {
+          onNotify(
+            'error',
+            'Gagal Sinkronisasi Cloud',
+            err instanceof Error ? err.message : 'Penilaian baris belum tersinkron ke Cloud.'
+          );
+        });
+    }
 
     setRows(prev => {
       const current = prev[rowToSave.nisn];
@@ -377,7 +397,25 @@ export const BatchEvaluationTable: React.FC<BatchEvaluationTableProps> = ({
           catatan: r.catatan.trim() || "Mutaba'ah tabel harian",
           statusPresensi: 'Hadir' as const
         }));
-      storage.saveBatchBacaanEvaluations(payload, user.nama);
+      const batchRes = storage.saveBatchBacaanEvaluations(payload, user.nama);
+      if (cloudDb.isCloudAuthenticated()) {
+        void cloudDb
+          .saveBatchBacaanEvaluationsCloud({
+            bacaanRecords: batchRes.savedBacaan,
+            absensiRecords: batchRes.savedAbsensi,
+            updatedStudents: batchRes.updatedStudents,
+            allBacaan: storage.getBacaan(),
+            allTahfidz: storage.getTahfidz(),
+            allAbsensi: storage.getAbsensi()
+          })
+          .catch(err => {
+            onNotify(
+              'error',
+              'Gagal Sinkronisasi Cloud',
+              err instanceof Error ? err.message : 'Presensi hadir massal belum tersinkron ke Cloud.'
+            );
+          });
+      }
       onDataUpdated();
       onNotify(
         'success',
@@ -454,6 +492,25 @@ export const BatchEvaluationTable: React.FC<BatchEvaluationTableProps> = ({
     }));
 
     const res = storage.saveBatchBacaanEvaluations(payload, user.nama);
+
+    if (cloudDb.isCloudAuthenticated()) {
+      try {
+        await cloudDb.saveBatchBacaanEvaluationsCloud({
+          bacaanRecords: res.savedBacaan,
+          absensiRecords: res.savedAbsensi,
+          updatedStudents: res.updatedStudents,
+          allBacaan: storage.getBacaan(),
+          allTahfidz: storage.getTahfidz(),
+          allAbsensi: storage.getAbsensi()
+        });
+      } catch (err) {
+        onNotify(
+          'error',
+          'Gagal Sinkronisasi Cloud',
+          err instanceof Error ? err.message : 'Penilaian massal belum tersinkron ke Cloud.'
+        );
+      }
+    }
 
     const nowTime = new Date().toLocaleTimeString('id-ID', {
       hour: '2-digit',
